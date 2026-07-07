@@ -33,7 +33,16 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @unquote/web exec playwright install --with-deps chromium
+      # The apt mirrors on hosted runners fail intermittently; retry before giving up.
+      - name: Install Playwright browsers
+        run: |
+          for attempt in 1 2 3; do
+            if pnpm --filter @unquote/web exec playwright install --with-deps chromium; then
+              exit 0
+            fi
+            sleep 15
+          done
+          exit 1
       - run: pnpm e2e
       - uses: actions/upload-artifact@v4
         if: always()
