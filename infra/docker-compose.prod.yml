@@ -1,0 +1,74 @@
+# Production stack: ClickHouse + web + Caddy on one box.
+# Reads secrets from ./.env (see .env.example). Run from infra/:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# The explicit project name keeps volumes and containers apart from the dev
+# compose file that lives in this same directory.
+name: unquote-prod
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    restart: always
+    environment:
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:?set in infra/.env}
+      APP_PASSWORD: ${APP_PASSWORD:?set in infra/.env}
+      LOADER_PASSWORD: ${LOADER_PASSWORD:?set in infra/.env}
+    ports:
+      # Localhost only: pipeline pushes arrive over an SSH tunnel, never the open internet.
+      - '127.0.0.1:8123:8123'
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/config.d/unquote.xml:/etc/clickhouse-server/config.d/zz-unquote.xml:ro
+      - ./clickhouse/users.d/default-access.xml:/etc/clickhouse-server/users.d/zz-default-access.xml:ro
+      - ./clickhouse/initdb:/docker-entrypoint-initdb.d:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'clickhouse-client',
+          '--password',
+          '${CLICKHOUSE_ADMIN_PASSWORD}',
+          '--query',
+          'SELECT 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    restart: always
+    environment:
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: app
+      CLICKHOUSE_PASSWORD: ${APP_PASSWORD}
+      ORIGIN: ${ORIGIN:-https://unquote.dwainosaur.com}
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: always
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
+volumes:
+  clickhouse-data:
+  caddy-data:
+  caddy-config:

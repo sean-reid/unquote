@@ -1,0 +1,8 @@
+<!-- The default (admin) user manages the service users created on first boot. -->
+<clickhouse>
+  <users>
+    <default>
+      <access_management>1</access_management>
+    </default>
+  </users>
+</clickhouse>
