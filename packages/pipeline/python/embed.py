@@ -47,6 +47,9 @@ def main() -> None:
     from sentence_transformers import SentenceTransformer
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
+    if device == "cpu":
+        print("warning: no MPS device, running on CPU (expect ~4x slower)", flush=True)
+    print(f"embedding on {device}", flush=True)
     model = SentenceTransformer(args.model, device=device)
     pooling = model[1]
     pooling.pooling_mode_cls_token = args.pooling == "cls"
