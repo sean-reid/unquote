@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildUtterances, cleanCueText, isMusicCue, splitTurns } from '../src/util/utterances.js';
+import {
+  buildUtterances,
+  cleanCueText,
+  isMusicCue,
+  lyricRunMask,
+  splitTurns,
+  unmarkedLyricMask,
+} from '../src/util/utterances.js';
+import { downrankSet, scoreFilm } from '../src/util/quality.js';
 
 describe('cleanCueText', () => {
   it('strips bracketed sound labels', () => {
@@ -16,10 +24,20 @@ describe('cleanCueText', () => {
     expect(cleanCueText('BRODY: Get out of the water!')).toBe('Get out of the water!');
   });
 
+  it('strips de-bracketed bold markers from damaged source pages', () => {
+    expect(cleanCueText("bYou've been a tremendous help./b")).toBe(
+      "You've been a tremendous help.",
+    );
+    expect(cleanCueText('b...I need to use the chair./b')).toBe('...I need to use the chair.');
+    expect(cleanCueText('but I never said that')).toBe('but I never said that');
+  });
+
   it('repairs subtitle OCR damage', () => {
     expect(cleanCueText("l'm not sure wouIdn't matter")).toBe("I'm not sure wouldn't matter");
     expect(cleanCueText('it"s over, l said')).toBe("it's over, I said");
     expect(cleanCueText("we weren 't there")).toBe("we weren't there");
+    expect(cleanCueText('you feII and got kiIIed')).toBe('you fell and got killed');
+    expect(cleanCueText('World War II ended')).toBe('World War II ended');
   });
 });
 
@@ -73,10 +91,20 @@ describe('buildUtterances', () => {
     expect(texts).toEqual(['We bought the house in the fall, and this is summer.']);
   });
 
-  it('drops music and counts it', () => {
+  it('drops marked lyrics and counts them', () => {
     const { texts, dropped } = buildUtterances(['♪ Farewell and adieu ♪', 'Nice song.']);
     expect(texts).toEqual(['Nice song.']);
-    expect(dropped.music).toBe(1);
+    expect(dropped.lyrics).toBe(1);
+  });
+
+  it('does not merge across a speaker change after a dangling fragment', () => {
+    const { texts } = buildUtterances(["I'm gassy.. okay", 'Hold it right there, glitch!']);
+    expect(texts).toEqual(["I'm gassy.. okay", 'Hold it right there, glitch!']);
+  });
+
+  it('never merges past a question or exclamation', () => {
+    const { texts } = buildUtterances(['Are you serious?', 'dead serious.']);
+    expect(texts).toEqual(['Are you serious?', 'dead serious.']);
   });
 
   it('drops cues that are only stage direction', () => {
@@ -90,5 +118,142 @@ describe('buildUtterances', () => {
     const { texts } = buildUtterances(Array(30).fill(fragment));
     expect(Math.max(...texts.map((t) => t.length))).toBeLessThanOrEqual(280);
     expect(texts.length).toBeGreaterThan(1);
+  });
+});
+
+describe('lyricRunMask', () => {
+  it('bridges unmarked continuations between marked lyric cues', () => {
+    const cues = [
+      '# You are the one that I want',
+      'ooh ooh ooh honey',
+      '# The one that I want',
+      'Tell me about it, stud.',
+    ];
+    const mask = lyricRunMask(cues, false);
+    expect(mask).toEqual([true, true, true, false]);
+  });
+
+  it('extends over unpunctuated neighbors at run edges', () => {
+    const cues = ['sailing away on the crest', '♪ of a wave ♪', "It's over."];
+    expect(lyricRunMask(cues, false)).toEqual([true, true, false]);
+  });
+
+  it('leaves an unmarked film untouched', () => {
+    const cues = ['Hello.', 'Goodbye.'];
+    expect(lyricRunMask(cues, true)).toEqual([false, false]);
+  });
+});
+
+describe('scoreFilm', () => {
+  const healthy = [
+    "You're gonna need a bigger boat.",
+    'We were on the Indianapolis.',
+    'Smile, you son of a...',
+    'This shark, swallow you whole.',
+  ];
+  const damaged = [
+    'weII l suppose lt was',
+    'he said lt"s over and',
+    'l dont know whlch way',
+    'the paln ls everywhere now',
+  ];
+
+  it('scores clean dialogue above OCR damage', () => {
+    const good = scoreFilm(1, healthy);
+    const bad = scoreFilm(2, damaged);
+    expect(good.score).toBeGreaterThan(bad.score + 20);
+  });
+
+  it('flags the worst decile for downranking', () => {
+    const qualities = Array.from({ length: 20 }, (_, i) => scoreFilm(i, i < 2 ? damaged : healthy));
+    const flagged = downrankSet(qualities);
+    expect(flagged.size).toBe(2);
+    expect(flagged.has(0)).toBe(true);
+    expect(flagged.has(1)).toBe(true);
+  });
+});
+
+describe('unmarkedLyricMask', () => {
+  const rap = [
+    'Protect me',
+    'My technique go X speed',
+    'On highways and Jet Skis',
+    "Look, I ain't got no time",
+    'To be hanging around nobody',
+    'Trying to figure out',
+    'If they good or evil',
+    "I'm fighting the crime",
+    'Saving your lives',
+  ];
+  const dialogue = [
+    'Where were you last night?',
+    'I was at home.',
+    'Nobody saw you leave.',
+    'Because I never left.',
+    'Then explain the car.',
+    'What car?',
+    'The one outside your house.',
+    'That is not mine.',
+  ];
+
+  it('flags a long unpunctuated title-case verse run', () => {
+    // Enough surrounding dialogue that the film reads as normally punctuated;
+    // a 16+ cue run needs no music marker (credits raps are never short).
+    const longRap = [...rap, ...rap];
+    const film = [...dialogue, ...dialogue, ...dialogue, ...dialogue, ...longRap];
+    const mask = unmarkedLyricMask(film);
+    expect(mask.slice(dialogue.length * 4).every(Boolean)).toBe(true);
+    expect(mask.slice(0, dialogue.length * 4).every((m) => !m)).toBe(true);
+  });
+
+  it('flags a short verse run only next to a music signal', () => {
+    const marked = ['["Sunflower" playing]', ...rap];
+    const film = [...dialogue, ...dialogue, ...marked];
+    const mask = unmarkedLyricMask(film);
+    expect(mask.slice(dialogue.length * 2 + 1).every(Boolean)).toBe(true);
+    const bare = [...dialogue, ...dialogue, ...rap];
+    const bareMask = unmarkedLyricMask(bare);
+    expect(bareMask.some(Boolean)).toBe(false);
+  });
+
+  it('spares a short recited poem with no music context', () => {
+    const poem = [
+      'Do not go gentle into that good night',
+      'Old age should burn and rave at close of day',
+      'Rage, rage against the dying of the light',
+      'Though wise men at their end',
+      'Know dark is right',
+      'Because their words had forked no lightning',
+    ];
+    const film = [...dialogue, ...dialogue, ...poem, ...dialogue];
+    expect(unmarkedLyricMask(film).some(Boolean)).toBe(false);
+  });
+
+  it('leaves normally punctuated dialogue alone', () => {
+    expect(unmarkedLyricMask(dialogue).some(Boolean)).toBe(false);
+  });
+
+  it('stands down entirely on films with sparse punctuation', () => {
+    const ocrDamaged = rap.concat(rap, rap);
+    expect(unmarkedLyricMask(ocrDamaged).some(Boolean)).toBe(false);
+  });
+});
+
+describe('quote-wrapped singing convention', () => {
+  it('drops consecutive quote-wrapped sung lines but keeps a lone quoted line', () => {
+    const cues = [
+      'Thank you. Where are you going?',
+      'To get my job back.',
+      '"Yeah, yeah"',
+      '"I am great Yeah, yeah"',
+      '"I am..." Good grief.',
+      "Is that what I'm drivin'?",
+      'He said "make it so." Remember?',
+    ];
+    const mask = lyricRunMask(cues, false);
+    expect(mask[2]).toBe(true);
+    expect(mask[3]).toBe(true);
+    expect(mask[0]).toBe(false);
+    expect(mask[6]).toBe(false);
   });
 });
