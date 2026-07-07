@@ -7,7 +7,12 @@
     "check": "tsc --noEmit",
     "build": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "slice": "tsx src/stages/slice.ts",
+    "extract": "tsx src/stages/extract.ts",
+    "utterances": "tsx src/stages/utterances.ts",
+    "embed": "tsx src/stages/embed.ts",
+    "load": "tsx src/stages/load.ts"
   },
   "dependencies": {
     "@clickhouse/client": "^1.23.1",
