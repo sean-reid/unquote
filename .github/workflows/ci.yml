@@ -37,7 +37,7 @@ jobs:
       - name: Install Playwright browsers
         run: |
           for attempt in 1 2 3; do
-            if pnpm --filter @unquote/web exec playwright install --with-deps chromium; then
+            if pnpm --filter @unquote/web exec playwright install --with-deps chromium webkit; then
               exit 0
             fi
             sleep 15
