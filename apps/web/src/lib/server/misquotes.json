@@ -1,0 +1,242 @@
+[
+  {
+    "popular": "Luke, I am your father",
+    "actual": "No, I am your father.",
+    "film": "The Empire Strikes Back",
+    "year": 1980
+  },
+  {
+    "popular": "Play it again, Sam",
+    "actual": "Play it, Sam. Play 'As Time Goes By.'",
+    "film": "Casablanca",
+    "year": 1942
+  },
+  {
+    "popular": "Beam me up, Scotty",
+    "actual": "Scotty, beam us up.",
+    "film": "Star Trek IV: The Voyage Home",
+    "year": 1986
+  },
+  {
+    "popular": "We're gonna need a bigger boat",
+    "actual": "You're gonna need a bigger boat.",
+    "film": "Jaws",
+    "year": 1975
+  },
+  {
+    "popular": "Mirror, mirror on the wall, who is the fairest of them all?",
+    "actual": "Magic mirror on the wall, who is the fairest one of all?",
+    "film": "Snow White and the Seven Dwarfs",
+    "year": 1937
+  },
+  {
+    "popular": "If you build it, they will come",
+    "actual": "If you build it, he will come.",
+    "film": "Field of Dreams",
+    "year": 1989
+  },
+  {
+    "popular": "Hello, Clarice",
+    "actual": "Good evening, Clarice.",
+    "film": "The Silence of the Lambs",
+    "year": 1991
+  },
+  {
+    "popular": "Do you feel lucky, punk?",
+    "actual": "You've got to ask yourself one question: 'Do I feel lucky?' Well, do ya, punk?",
+    "film": "Dirty Harry",
+    "year": 1971
+  },
+  {
+    "popular": "Frankly, Scarlett, I don't give a damn",
+    "actual": "Frankly, my dear, I don't give a damn.",
+    "film": "Gone with the Wind",
+    "year": 1939
+  },
+  {
+    "popular": "I'll make him an offer he can't refuse",
+    "actual": "I'm going to make him an offer he can't refuse.",
+    "film": "The Godfather",
+    "year": 1972
+  },
+  {
+    "popular": "Toto, I don't think we're in Kansas anymore",
+    "actual": "Toto, I've a feeling we're not in Kansas anymore.",
+    "film": "The Wizard of Oz",
+    "year": 1939
+  },
+  {
+    "popular": "Greed is good",
+    "actual": "Greed, for lack of a better word, is good.",
+    "film": "Wall Street",
+    "year": 1987
+  },
+  {
+    "popular": "Run, you fools!",
+    "actual": "Fly, you fools!",
+    "film": "The Lord of the Rings: The Fellowship of the Ring",
+    "year": 2001
+  },
+  {
+    "popular": "Life is like a box of chocolates",
+    "actual": "My mom always said life was like a box of chocolates. You never know what you're gonna get.",
+    "film": "Forrest Gump",
+    "year": 1994
+  },
+  {
+    "popular": "Badges? We don't need no stinking badges!",
+    "actual": "Badges? We ain't got no badges. We don't need no badges. I don't have to show you any stinking badges!",
+    "film": "The Treasure of the Sierra Madre",
+    "year": 1948
+  },
+  {
+    "popular": "Fasten your seatbelts, it's going to be a bumpy ride",
+    "actual": "Fasten your seatbelts. It's going to be a bumpy night.",
+    "film": "All About Eve",
+    "year": 1950
+  },
+  {
+    "popular": "Me Tarzan, you Jane",
+    "actual": "Jane. Tarzan. Jane. Tarzan.",
+    "film": "Tarzan the Ape Man",
+    "year": 1932
+  },
+  {
+    "popular": "You dirty rat",
+    "actual": "That dirty, double-crossing rat.",
+    "film": "Blonde Crazy",
+    "year": 1931
+  },
+  {
+    "popular": "Win one for the Gipper",
+    "actual": "Win just one for the Gipper.",
+    "film": "Knute Rockne All American",
+    "year": 1940
+  },
+  {
+    "popular": "The first rule of Fight Club is don't talk about Fight Club",
+    "actual": "The first rule of Fight Club is: you do not talk about Fight Club.",
+    "film": "Fight Club",
+    "year": 1999
+  },
+  {
+    "popular": "Nobody puts Baby in the corner",
+    "actual": "Nobody puts Baby in a corner.",
+    "film": "Dirty Dancing",
+    "year": 1987
+  },
+  {
+    "popular": "You're a wizard, Harry",
+    "actual": "Yer a wizard, Harry.",
+    "film": "Harry Potter and the Philosopher's Stone",
+    "year": 2001
+  },
+  {
+    "popular": "Keep your friends close and your enemies closer",
+    "actual": "My father taught me many things here. He taught me: keep your friends close, but your enemies closer.",
+    "film": "The Godfather Part II",
+    "year": 1974
+  },
+  {
+    "popular": "These are not the droids you're looking for",
+    "actual": "These aren't the droids you're looking for.",
+    "film": "Star Wars",
+    "year": 1977
+  },
+  {
+    "popular": "Snakes. Why did it have to be snakes?",
+    "actual": "Snakes. Why'd it have to be snakes?",
+    "film": "Raiders of the Lost Ark",
+    "year": 1981
+  },
+  {
+    "popular": "What we have here is a failure to communicate",
+    "actual": "What we've got here is failure to communicate.",
+    "film": "Cool Hand Luke",
+    "year": 1967
+  },
+  {
+    "popular": "I love the smell of napalm in the morning. It smells like victory",
+    "actual": "I love the smell of napalm in the morning. You know, one time we had a hill bombed for twelve hours. The smell, you know, that gasoline smell. The whole hill. Smelled like victory.",
+    "film": "Apocalypse Now",
+    "year": 1979
+  },
+  {
+    "popular": "Open the pod bay doors, HAL",
+    "actual": "Open the pod bay doors, please, HAL.",
+    "film": "2001: A Space Odyssey",
+    "year": 1968
+  },
+  {
+    "popular": "Mrs. Robinson, are you trying to seduce me?",
+    "actual": "Mrs. Robinson, you're trying to seduce me. Aren't you?",
+    "film": "The Graduate",
+    "year": 1967
+  },
+  {
+    "popular": "I ate his liver with some fava beans and a nice bottle of Chianti",
+    "actual": "A census taker once tried to test me. I ate his liver with some fava beans and a nice Chianti.",
+    "film": "The Silence of the Lambs",
+    "year": 1991
+  },
+  {
+    "popular": "Top of the world, Ma!",
+    "actual": "Made it, Ma! Top of the world!",
+    "film": "White Heat",
+    "year": 1949
+  },
+  {
+    "popular": "Every time a bell rings, an angel gets its wings",
+    "actual": "Every time you hear a bell ring, it means that some angel's just got his wings.",
+    "film": "It's a Wonderful Life",
+    "year": 1946
+  },
+  {
+    "popular": "Why don't you come up and see me sometime?",
+    "actual": "Why don't you come up sometime and see me?",
+    "film": "She Done Him Wrong",
+    "year": 1933
+  },
+  {
+    "popular": "Get your stinking paws off me, you damn dirty ape",
+    "actual": "Take your stinking paws off me, you damn dirty ape!",
+    "film": "Planet of the Apes",
+    "year": 1968
+  },
+  {
+    "popular": "I'm mad as hell and I'm not going to take it anymore",
+    "actual": "I'm as mad as hell, and I'm not going to take this anymore!",
+    "film": "Network",
+    "year": 1976
+  },
+  {
+    "popular": "The stuff dreams are made of",
+    "actual": "The, uh, stuff that dreams are made of.",
+    "film": "The Maltese Falcon",
+    "year": 1941
+  },
+  {
+    "popular": "It puts the lotion on its skin",
+    "actual": "It rubs the lotion on its skin. It does this whenever it is told.",
+    "film": "The Silence of the Lambs",
+    "year": 1991
+  },
+  {
+    "popular": "No wire hangers!",
+    "actual": "No wire hangers, ever!",
+    "film": "Mommie Dearest",
+    "year": 1981
+  },
+  {
+    "popular": "Houston, we've got a problem",
+    "actual": "Houston, we have a problem.",
+    "film": "Apollo 13",
+    "year": 1995
+  },
+  {
+    "popular": "Elementary, my dear Watson",
+    "actual": "Elementary, my dear fellow.",
+    "film": "The Return of Sherlock Holmes",
+    "year": 1929
+  }
+]

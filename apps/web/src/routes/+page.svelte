@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { alignWords } from '@unquote/shared';
+  import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import type { PageData } from './$types.js';
@@ -6,6 +8,7 @@
   let { data }: { data: PageData } = $props();
 
   let query = $derived(data.response?.query ?? '');
+  let phraseOpen = $derived(browser ? !window.matchMedia('(max-width: 480px)').matches : true);
 
   const hasResults = $derived(data.response !== null && data.response.hits.length > 0);
   const searched = $derived(data.response !== null);
@@ -22,7 +25,7 @@
   }
 
   function arcLabel(arc: number): string {
-    return `${Math.round(arc * 100)}% in`;
+    return `${Math.round(arc * 100)}% through`;
   }
 </script>
 
@@ -61,6 +64,66 @@
 
   {#if searched}
     <section class="results" aria-label="Search results">
+      {#if data.response!.misquote}
+        {@const misquote = data.response!.misquote}
+        <div class="misquote">
+          <p class="misquote-label">Commonly misquoted</p>
+          <blockquote>
+            {#each alignWords(misquote.popular, misquote.actual) as part, i (i)}{i > 0
+                ? ' '
+                : ''}{#if part.changed}<mark>{part.word}</mark>{:else}{part.word}{/if}{/each}
+          </blockquote>
+          <p class="misquote-film">
+            {misquote.film}{#if misquote.year}&nbsp;({misquote.year}){/if}
+          </p>
+        </div>
+      {/if}
+
+      {#if data.response!.phrase}
+        {@const phrase = data.response!.phrase}
+        {@const maxArc = Math.max(...phrase.arcBuckets)}
+        {@const maxDecade = Math.max(...phrase.decades.map((d) => d.share))}
+        <details class="phrase" bind:open={phraseOpen}>
+          <summary>
+            Said in {phrase.films} films, {phrase.occurrences} times. First in
+            {phrase.firstTitle} ({phrase.firstYear}).
+          </summary>
+          <div class="phrase-charts">
+            <div class="phrase-chart" aria-label="Where in films this phrase is said">
+              <p>Where in the film</p>
+              <div class="bars">
+                {#each phrase.arcBuckets as count, i (i)}
+                  <span
+                    class="bar"
+                    style:height="{maxArc ? Math.max((count / maxArc) * 100, 3) : 3}%"
+                    title="{i * 10}-{i * 10 + 10}%: {count}"
+                  ></span>
+                {/each}
+              </div>
+              <div class="bar-ends"><span>start</span><span>end</span></div>
+            </div>
+            <div class="phrase-chart" aria-label="Share of each decade's films saying it">
+              <p>Share of films by decade</p>
+              <div class="bars">
+                {#each phrase.decades as d (d.decade)}
+                  <span
+                    class="bar"
+                    style:height="{maxDecade ? Math.max((d.share / maxDecade) * 100, 3) : 3}%"
+                    title="{d.decade}s: {d.films} of {d.corpusFilms} films ({Math.round(
+                      d.share * 100,
+                    )}%)"
+                  ></span>
+                {/each}
+              </div>
+              <div class="bar-ends">
+                <span>{phrase.decades[0]?.decade}s</span>
+                <span>{phrase.decades[phrase.decades.length - 1]?.decade}s</span>
+              </div>
+            </div>
+          </div>
+        </details>
+      {/if}
+
       {#if data.response!.movie}
         {@const movie = data.response!.movie}
         <div class="movie-banner">
@@ -93,11 +156,26 @@
                 <span class="poster-blank"></span>
               {/if}
               <div>
-                <blockquote>{hit.text}</blockquote>
+                {#if hit.nearMiss}
+                  <p class="remembering">You might be remembering:</p>
+                  <blockquote>
+                    {#each alignWords(query, hit.text) as part, i (i)}{i > 0
+                        ? ' '
+                        : ''}{#if part.changed}<mark>{part.word}</mark
+                        >{:else}{part.word}{/if}{/each}
+                  </blockquote>
+                {:else}
+                  <blockquote>{hit.text}</blockquote>
+                {/if}
                 <p class="meta">
                   <strong>{hit.title}</strong>
                   <span class="year">({hit.year})</span>
-                  <span class="arc">{arcLabel(hit.arc)}</span>
+                  <span
+                    class="arc"
+                    title="{Math.round(hit.arc * 100)}% of the way through the film"
+                  >
+                    {arcLabel(hit.arc)}
+                  </span>
                   {#if hit.occurrences > 1}
                     <span class="arc">said {hit.occurrences} times</span>
                   {/if}
@@ -202,6 +280,99 @@
   .results {
     width: min(44rem, 100%);
     padding-bottom: var(--space-6);
+  }
+
+  mark {
+    background: none;
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  .remembering {
+    margin: 0 0 var(--space-1);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+
+  .misquote {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--space-3);
+    margin: var(--space-3) 0;
+  }
+
+  .misquote-label {
+    margin: 0 0 var(--space-2);
+    color: var(--accent);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .misquote blockquote {
+    font-size: 1.2rem;
+    margin: 0 0 var(--space-2);
+  }
+
+  .misquote-film {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  .phrase {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--space-2) var(--space-3);
+    margin: var(--space-3) 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  .phrase summary {
+    cursor: pointer;
+  }
+
+  .phrase-charts {
+    display: flex;
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .phrase-chart {
+    flex: 1;
+    min-width: 10rem;
+  }
+
+  .phrase-chart p {
+    margin: 0 0 var(--space-1);
+    font-size: 0.75rem;
+  }
+
+  .bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 3rem;
+  }
+
+  .bar {
+    flex: 1;
+    background: var(--accent);
+    opacity: 0.7;
+    border-radius: 2px 2px 0 0;
+    min-height: 2px;
+  }
+
+  .bar-ends {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    margin-top: 2px;
   }
 
   .movie-banner {

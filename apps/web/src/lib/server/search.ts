@@ -1,14 +1,18 @@
 import {
+  diffStats,
   normalize,
   rrf,
   tokenize,
+  type MisquoteMatch,
   type MovieMatch,
+  type PhraseStats,
   type SearchArm,
   type SearchHit,
   type SearchResponse,
 } from '@unquote/shared';
 import { db } from './db.js';
 import { embedQuery } from './embed.js';
+import misquoteEntries from './misquotes.json' with { type: 'json' };
 
 interface MovieRow {
   id: number;
@@ -28,6 +32,12 @@ interface LineRow {
 const EXACT_LIMIT = 50;
 const KEYWORD_LIMIT = 100;
 const SEMANTIC_LIMIT = 100;
+/** Distinct films required before a phrase earns its statistics card. */
+const PHRASE_MIN_FILMS = 8;
+
+const misquotesByQuery = new Map<string, MisquoteMatch>(
+  misquoteEntries.map((entry) => [normalize(entry.popular), entry]),
+);
 /** rrf scores top out around 0.05; this keeps verbatim hits above any fusion of fuzzy ones. */
 const EXACT_BOOST = 1;
 const MOVIE_CACHE_MS = 60_000;
@@ -131,6 +141,90 @@ async function semanticArm(query: string): Promise<LineRow[]> {
   return rows;
 }
 
+interface PhraseRow {
+  films: number;
+  occurrences: number;
+  first_year: number;
+  first_title: string;
+  arc_map: Record<string, string>;
+  decade_map: Record<string, string>;
+}
+
+/** Corpus-wide statistics for a phrase already known to have exact matches. */
+async function phraseStats(queryNorm: string): Promise<PhraseStats | null> {
+  const started = Date.now();
+  const result = await db.query({
+    query: `
+      SELECT
+        uniqExact(l.movie_id) AS films,
+        count() AS occurrences,
+        min(m.year) AS first_year,
+        argMin(m.title, m.year) AS first_title,
+        sumMap(map(least(toUInt8(floor(l.arc * 10)), 9), toUInt64(1))) AS arc_map,
+        uniqExactMap(map(m.decade, l.movie_id)) AS decade_map
+      FROM lines AS l
+      INNER JOIN movies AS m ON m.id = l.movie_id
+      WHERE positionCaseInsensitive(l.text_norm, {q:String}) > 0
+    `,
+    query_params: { q: queryNorm },
+    format: 'JSONEachRow',
+  });
+  const rows = (await result.json()) as PhraseRow[];
+  console.log(`phrase card: ${Date.now() - started}ms`);
+  const row = rows[0];
+  if (!row || Number(row.films) < PHRASE_MIN_FILMS) return null;
+
+  const arcBuckets = new Array<number>(10).fill(0);
+  for (const [bucket, count] of Object.entries(row.arc_map)) {
+    arcBuckets[Number(bucket)] = Number(count);
+  }
+  // Normalize by corpus coverage: raw counts would show every phrase "rising"
+  // simply because recent decades have more films. Zero-fill the full corpus
+  // range so absent decades read as absence, not as a shorter timeline.
+  const corpusByDecade = new Map<number, number>();
+  for (const movie of await allMovies()) {
+    const decade = Math.floor(movie.year / 10) * 10;
+    corpusByDecade.set(decade, (corpusByDecade.get(decade) ?? 0) + 1);
+  }
+  const allDecades = [...corpusByDecade.keys()].sort((a, b) => a - b);
+  const filmsByDecade = new Map(
+    Object.entries(row.decade_map).map(([decade, films]) => [Number(decade), Number(films)]),
+  );
+  const decades = allDecades.map((decade) => {
+    const films = filmsByDecade.get(decade) ?? 0;
+    const corpusFilms = corpusByDecade.get(decade) ?? 0;
+    return { decade, films, corpusFilms, share: corpusFilms ? films / corpusFilms : 0 };
+  });
+
+  return {
+    films: Number(row.films),
+    occurrences: Number(row.occurrences),
+    firstTitle: row.first_title,
+    firstYear: Number(row.first_year),
+    arcBuckets,
+    decades,
+  };
+}
+
+/**
+ * The top hit reads like what the user was trying to remember when it came
+ * from the semantic arm alone and sits a few word swaps away from the query.
+ */
+function markNearMiss(queryNorm: string, top: SearchHit[]): void {
+  const first = top[0];
+  if (!first) return;
+  if (first.arms.length !== 1 || first.arms[0] !== 'semantic') return;
+  const stats = diffStats(queryNorm, normalize(first.text));
+  if (
+    stats.substitutions >= 1 &&
+    stats.substitutions <= 3 &&
+    stats.extras <= 2 &&
+    stats.sharedRatio >= 0.6
+  ) {
+    first.nearMiss = true;
+  }
+}
+
 function lineKey(row: LineRow): string {
   return `${row.movie_id}:${row.seq}`;
 }
@@ -225,10 +319,20 @@ export async function search(query: string): Promise<SearchResponse> {
   }
   const top = deduped.slice(0, 50);
 
+  const misquote = misquotesByQuery.get(queryNorm) ?? null;
+  if (!misquote) markNearMiss(queryNorm, top);
+
+  // Raw exact rows cap at EXACT_LIMIT, so use them only as a cheap gate; the
+  // aggregate counts every occurrence corpus-wide.
+  const phrase =
+    exact.length >= PHRASE_MIN_FILMS && !misquote ? await phraseStats(queryNorm) : null;
+
   return {
     query,
     hits: top,
     strongCount: findCliff(top.map((h) => h.score)),
     movie,
+    misquote,
+    phrase,
   };
 }
