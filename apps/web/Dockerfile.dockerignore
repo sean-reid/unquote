@@ -1,0 +1,14 @@
+.git
+**/node_modules
+**/.svelte-kit
+**/.turbo
+**/build
+**/dist
+**/test-results
+**/playwright-report
+packages/pipeline/data
+packages/pipeline/fixtures
+infra
+.env
+.env.*
+PLAN.md
