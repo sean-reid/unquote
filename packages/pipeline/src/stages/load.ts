@@ -86,9 +86,7 @@ async function createTables(ch: ClickHouseClient): Promise<void> {
 }
 
 async function loadMovies(ch: ClickHouseClient, sliceIds: Set<number>): Promise<number> {
-  const all: MovieRecord[] = JSON.parse(
-    await readFile(path.join(DATA_DIR, 'movies.json'), 'utf8'),
-  );
+  const all: MovieRecord[] = JSON.parse(await readFile(path.join(DATA_DIR, 'movies.json'), 'utf8'));
   const rows = all
     .filter((m) => sliceIds.has(m.id))
     .map((m) => ({
@@ -138,9 +136,7 @@ async function loadLines(ch: ClickHouseClient, sliceIds: Set<number>): Promise<n
     if (!sliceIds.has(utterance.movieId)) continue;
 
     await embeddings.read(vecBuffer, 0, rowBytes, index * rowBytes);
-    const vec = Array.from(
-      new Float32Array(vecBuffer.buffer, vecBuffer.byteOffset, EMBED_DIM),
-    );
+    const vec = Array.from(new Float32Array(vecBuffer.buffer, vecBuffer.byteOffset, EMBED_DIM));
     batch.push({
       movie_id: utterance.movieId,
       seq: utterance.seq,

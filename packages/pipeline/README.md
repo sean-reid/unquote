@@ -6,13 +6,13 @@ Offline data pipeline. Each stage is a standalone script that reads and writes a
 
 Run from this package with `pnpm exec tsx src/stages/<stage>.ts`, in order:
 
-| Stage        | Reads                                    | Writes                                            |
-| ------------ | ---------------------------------------- | ------------------------------------------------- |
-| `slice`      | `movies.json`, `scripts.json`            | `slice.json` (film ids, top 300 by TMDb votes)    |
-| `extract`    | `slice.json`, HTTP cache                 | `cues.jsonl`, `extract-report.json`               |
-| `utterances` | `cues.jsonl`                             | `utterances.jsonl`, `utterances-report.json`      |
-| `embed`      | `utterances.jsonl`                       | `embeddings.bin`, `embeddings.meta.json`          |
-| `load`       | artifacts above                          | ClickHouse tables (staging swap)                  |
+| Stage        | Reads                         | Writes                                         |
+| ------------ | ----------------------------- | ---------------------------------------------- |
+| `slice`      | `movies.json`, `scripts.json` | `slice.json` (film ids, top 300 by TMDb votes) |
+| `extract`    | `slice.json`, HTTP cache      | `cues.jsonl`, `extract-report.json`            |
+| `utterances` | `cues.jsonl`                  | `utterances.jsonl`, `utterances-report.json`   |
+| `embed`      | `utterances.jsonl`            | `embeddings.bin`, `embeddings.meta.json`       |
+| `load`       | artifacts above               | ClickHouse tables (staging swap)               |
 
 ## Artifact formats
 

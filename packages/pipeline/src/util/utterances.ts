@@ -100,8 +100,7 @@ export function buildUtterances(cues: string[]): BuildResult {
         buffer = turn.text;
         continue;
       }
-      const continues =
-        !turn.newSpeaker && (!TERMINAL.test(buffer) || /^[a-z]/.test(turn.text));
+      const continues = !turn.newSpeaker && (!TERMINAL.test(buffer) || /^[a-z]/.test(turn.text));
       if (continues && buffer.length + turn.text.length + 1 <= MAX_UTTERANCE_CHARS) {
         buffer = `${buffer} ${turn.text}`;
       } else {

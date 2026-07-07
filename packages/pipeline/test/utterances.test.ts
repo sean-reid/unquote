@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildUtterances,
-  cleanCueText,
-  isMusicCue,
-  splitTurns,
-} from '../src/util/utterances.js';
+import { buildUtterances, cleanCueText, isMusicCue, splitTurns } from '../src/util/utterances.js';
 
 describe('cleanCueText', () => {
   it('strips bracketed sound labels', () => {

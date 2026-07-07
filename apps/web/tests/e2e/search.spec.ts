@@ -9,9 +9,12 @@ let lineCount = 0;
 
 test.beforeAll(async () => {
   try {
-    const response = await fetch(`${CLICKHOUSE}/?query=${encodeURIComponent('SELECT count() FROM unquote.lines')}`, {
-      headers: { authorization: `Basic ${AUTH}` },
-    });
+    const response = await fetch(
+      `${CLICKHOUSE}/?query=${encodeURIComponent('SELECT count() FROM unquote.lines')}`,
+      {
+        headers: { authorization: `Basic ${AUTH}` },
+      },
+    );
     lineCount = response.ok ? Number((await response.text()).trim()) : 0;
   } catch {
     lineCount = 0;
