@@ -51,6 +51,12 @@
         autocomplete="off"
       />
     </form>
+    {#if !searched && data.filmCount}
+      <p class="corpus-note">
+        Searching {data.filmCount.toLocaleString('en-US')} films while the full library loads in. More
+        every week.
+      </p>
+    {/if}
   </header>
 
   {#if searched}
@@ -111,6 +117,7 @@
       Film data from <a href="https://www.themoviedb.org">TMDb</a>. This product uses the TMDb API
       but is not endorsed or certified by TMDb.
     </p>
+    <p>No cookies. Anonymous, self-hosted analytics.</p>
   </footer>
 </main>
 
@@ -164,6 +171,13 @@
     font-style: italic;
     font-size: var(--text-lg);
     margin: 0 0 var(--space-4);
+  }
+
+  .corpus-note {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin: 0;
+    text-align: center;
   }
 
   form {

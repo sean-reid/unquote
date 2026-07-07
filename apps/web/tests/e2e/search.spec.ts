@@ -60,6 +60,14 @@ test('a repeated line collapses to one hit with a count', async ({ page }) => {
   await expect(exactHits.first()).toContainText(/said \d+ times/);
 });
 
+test('the corpus banner shows on the landing page only', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.corpus-note')).toBeVisible();
+  await expect(page.locator('.corpus-note')).toContainText(/\d+ films/);
+  await page.goto('/?q=may the force be with you');
+  await expect(page.locator('.corpus-note')).toHaveCount(0);
+});
+
 test('a descriptive query still returns moments', async ({ page }) => {
   await page.goto('/?q=a farewell before a long journey');
   await expect(page.locator('.hit').first()).toBeVisible();

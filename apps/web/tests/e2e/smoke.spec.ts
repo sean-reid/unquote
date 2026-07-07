@@ -13,6 +13,13 @@ test('landing page renders the search box', async ({ page }, testInfo) => {
   });
 });
 
+test('browsing sets no cookies', async ({ page }) => {
+  await page.goto('/');
+  await page.goto('/?q=hello');
+  const cookies = await page.evaluate(() => document.cookie);
+  expect(cookies).toBe('');
+});
+
 test('light theme applies its palette', async ({ page }, testInfo) => {
   await page.addInitScript(() => localStorage.setItem('theme', 'light'));
   await page.goto('/');

@@ -45,6 +45,15 @@ async function allMovies(): Promise<MovieRow[]> {
   return rows;
 }
 
+/** Indexed film count for the corpus banner; 0 when the database is unreachable. */
+export async function movieCount(): Promise<number> {
+  try {
+    return (await allMovies()).length;
+  } catch {
+    return 0;
+  }
+}
+
 function toMatch(row: MovieRow): MovieMatch {
   return { movieId: row.id, title: row.title, year: row.year, posterPath: row.poster_path };
 }
