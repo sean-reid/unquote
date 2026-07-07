@@ -14,7 +14,7 @@ Run from this package with `pnpm exec tsx src/stages/<stage>.ts`, in order:
 | `embed`      | `utterances.jsonl`                | `embeddings.bin`, `embeddings.meta.json`                     |
 | `load`       | artifacts above                   | ClickHouse tables (staging swap)                             |
 
-For `embed`, the GPU embedder under `python/` is the default for corpus-scale runs (3.4x faster; see the GPU embedder section). The js stage is the reference implementation: it shares runtime and recipe with the web app's query encoder, defines the encoding every other path is validated against, and keeps the pipeline runnable where Python or Metal is unavailable.
+`pnpm embed` runs the GPU embedder under `python/` (3.4x faster; see the GPU embedder section). `pnpm embed:cpu` runs the js stage, the reference implementation: it shares runtime and recipe with the web app's query encoder, defines the encoding every other path is validated against, and keeps the pipeline runnable where Python or Metal is unavailable.
 
 ## Artifact formats
 
