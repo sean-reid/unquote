@@ -1,0 +1,27 @@
+# Working notes, never tracked
+PLAN.md
+
+# AI tooling
+.claude/
+CLAUDE.md
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.svelte-kit/
+.turbo/
+coverage/
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Env and local data
+.env
+.env.*
+!.env.example
+packages/pipeline/data/
+
+# OS
+.DS_Store

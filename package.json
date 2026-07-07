@@ -1,0 +1,38 @@
+{
+  "name": "unquote",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Search 2,500 films' dialogue by quote, half-memory, or scene description.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "turbo run check",
+    "test": "turbo run test",
+    "e2e": "turbo run e2e",
+    "db:up": "docker compose -f infra/docker-compose.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.yml down"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp", "onnxruntime-node", "protobufjs"]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.31.0",
+    "eslint": "^9.31.0",
+    "eslint-plugin-svelte": "^3.11.0",
+    "globals": "^16.3.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-svelte": "^3.4.0",
+    "turbo": "^2.5.5",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.38.0"
+  }
+}

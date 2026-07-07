@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+.svelte-kit/
+.turbo/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+packages/pipeline/data/
+PLAN.md
