@@ -22,7 +22,12 @@
     "db:down": "docker compose -f infra/docker-compose.yml down"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "sharp", "onnxruntime-node", "protobufjs"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "onnxruntime-node",
+      "protobufjs"
+    ]
   },
   "devDependencies": {
     "@eslint/js": "^9.31.0",

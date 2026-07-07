@@ -6,12 +6,12 @@ Search the dialogue of ~2,500 films. Type a quote, a quote you only half remembe
 
 This is a pnpm + Turborepo monorepo.
 
-| Path                | What it is                                                                 |
-| ------------------- | -------------------------------------------------------------------------- |
-| `apps/web`          | SvelteKit front end and API (server routes query ClickHouse directly)      |
-| `packages/shared`   | Shared types and pure logic (text normalization, query handling)           |
-| `packages/pipeline` | Offline data pipeline: fetch, parse, segment, embed, and load the corpus   |
-| `infra`             | ClickHouse compose file, deploy and ops scripts                            |
+| Path                | What it is                                                               |
+| ------------------- | ------------------------------------------------------------------------ |
+| `apps/web`          | SvelteKit front end and API (server routes query ClickHouse directly)    |
+| `packages/shared`   | Shared types and pure logic (text normalization, query handling)         |
+| `packages/pipeline` | Offline data pipeline: fetch, parse, segment, embed, and load the corpus |
+| `infra`             | ClickHouse compose file, deploy and ops scripts                          |
 
 ## Getting started
 
