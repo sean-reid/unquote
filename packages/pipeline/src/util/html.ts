@@ -49,9 +49,31 @@ export function splitCues(inner: string): string[] {
   return inner
     .split(/<br\s*\/?>/i)
     .map((frag) =>
+      // Strip tags again after decoding: some pages double-escape markup
+      // (&lt;b&gt;), which only becomes a tag once entities are decoded.
       decodeEntities(frag.replace(/<[^>]+>/g, ' '))
+        .replace(/<[^>]+>/g, ' ')
         .replace(/\s+/g, ' ')
         .trim(),
     )
     .filter((frag) => frag.length > 0);
+}
+
+/**
+ * Fallback for the page variant that ships the whole transcript as one block
+ * with no <br> structure and inline ALL-CAPS speaker names ("1 Part 1 JUSTINE
+ * Sir..."). Strips the speaker tokens and part markers, then cuts sentences
+ * after terminal punctuation. Coarser than real cues, far better than one blob.
+ */
+export function sentenceCues(inner: string): string[] {
+  const text = decodeEntities(inner.replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .replace(/\b(?:\d+\s+)?Part\s+\d+\b/gi, ' ')
+    .replace(/\b[A-Z][A-Z'.]{2,}(?:\s+[A-Z][A-Z'.]{2,}){0,2}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text
+    .split(/(?<=[.?!…]["'”’]?)\s+/)
+    .map((sentence) => sentence.replace(/^\d+\s+/, '').trim())
+    .filter((sentence) => sentence.length > 1);
 }

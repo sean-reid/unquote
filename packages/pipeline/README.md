@@ -6,13 +6,13 @@ Offline data pipeline. Each stage is a standalone script that reads and writes a
 
 Run from this package with `pnpm exec tsx src/stages/<stage>.ts`, in order:
 
-| Stage        | Reads                         | Writes                                         |
-| ------------ | ----------------------------- | ---------------------------------------------- |
-| `slice`      | `movies.json`, `scripts.json` | `slice.json` (film ids, top 300 by TMDb votes) |
-| `extract`    | `slice.json`, HTTP cache      | `cues.jsonl`, `extract-report.json`            |
-| `utterances` | `cues.jsonl`                  | `utterances.jsonl`, `utterances-report.json`   |
-| `embed`      | `utterances.jsonl`            | `embeddings.bin`, `embeddings.meta.json`       |
-| `load`       | artifacts above               | ClickHouse tables (staging swap)               |
+| Stage        | Reads                             | Writes                                                       |
+| ------------ | --------------------------------- | ------------------------------------------------------------ |
+| `slice`      | `movies.json`, `scripts.json`     | `slice.json` (top 300 by votes; `FULL=1` selects every film) |
+| `extract`    | `slice.json`, HTTP cache          | `cues.jsonl`, `extract-report.json`                          |
+| `utterances` | `cues.jsonl`, `cues-rescue.jsonl` | `utterances.jsonl`, `utterances-report.json`, `quality.json` |
+| `embed`      | `utterances.jsonl`                | `embeddings.bin`, `embeddings.meta.json`                     |
+| `load`       | artifacts above                   | ClickHouse tables (staging swap)                             |
 
 ## Artifact formats
 
@@ -22,4 +22,6 @@ Run from this package with `pnpm exec tsx src/stages/<stage>.ts`, in order:
 
 ## Extraction notes
 
-Transcripts come from the cached Springfield! Springfield! pages (SHA1-of-URL keys under `data/cache/http/`). The lookup replays the site's search to find each film's slug, checks the year, then splits the `scrolling-script-container` div on `<br>` boundaries. Cues are display fragments, not lines; see `src/util/utterances.ts` for the reconstruction rules and `test/` for their specification.
+Transcripts come from the cached Springfield! Springfield! pages (SHA1-of-URL keys under `data/cache/http/`). The lookup replays the site's search to find each film's slug, checks the year, then splits the `scrolling-script-container` div on `<br>` boundaries. A rare page variant has no `<br>` structure at all; those films fall back to sentence splitting with inline speaker names removed and are listed under `fallbackFilms` in `extract-report.json`. Cues are display fragments, not lines; see `src/util/utterances.ts` for the reconstruction rules and `test/` for their specification.
+
+Quality: every film gets a transcript health score (punctuation density, dictionary hit rate, OCR artifact rate) written to `quality.json`; the worst decile carries a `downrank` flag and wrong-language transcripts a `nonEnglish` flag for downstream ranking. Lyrics are dropped by run detection around music-marked cues (wider windows for Music-genre films). Sources that mark no lyrics at all still slip through; those films land in the downranked tail.

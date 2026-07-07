@@ -1,5 +1,5 @@
 import { politeFetchText } from './http.js';
-import { extractDivByClass, splitCues } from './html.js';
+import { extractDivByClass, sentenceCues, splitCues } from './html.js';
 import { titleKey } from './title.js';
 
 const SS = 'https://www.springfieldspringfield.co.uk';
@@ -28,11 +28,18 @@ export function findSlug(resultsHtml: string, title: string, year: number): stri
   return null;
 }
 
+export interface CueResult {
+  cues: string[];
+  /** True when the page had no <br> structure and sentences were split instead. */
+  fallback: boolean;
+}
+
 /**
  * Locate a film's transcript (offline via the HTTP cache) and return its ordered
- * subtitle cues, or null when the lookup misses.
+ * subtitle cues, or null when the lookup misses. Pages without <br> structure
+ * (a rare template variant) fall back to sentence splitting.
  */
-export async function fetchCues(title: string, year: number): Promise<string[] | null> {
+export async function fetchCues(title: string, year: number): Promise<CueResult | null> {
   const results = await politeFetchText(searchUrl(title));
   if (!results) return null;
   const slug = findSlug(results, title, year);
@@ -42,5 +49,8 @@ export async function fetchCues(title: string, year: number): Promise<string[] |
   const inner = extractDivByClass(page, 'scrolling-script-container');
   if (!inner) return null;
   const cues = splitCues(inner);
-  return cues.length > 0 ? cues : null;
+  if (cues.length >= 10) return { cues, fallback: false };
+  const sentences = sentenceCues(inner);
+  if (sentences.length > cues.length) return { cues: sentences, fallback: true };
+  return cues.length > 0 ? { cues, fallback: false } : null;
 }

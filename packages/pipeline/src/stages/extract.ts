@@ -13,6 +13,7 @@ const byId = new Map(movies.map((m) => [m.id, m]));
 
 const cues: Cue[] = [];
 const warnings: string[] = [];
+const fallbackFilms: string[] = [];
 let films = 0;
 
 for (const movieId of slice) {
@@ -21,15 +22,18 @@ for (const movieId of slice) {
     warnings.push(`movie ${movieId} not in movies.json`);
     continue;
   }
-  const filmCues = await fetchCues(movie.title, movie.year);
-  if (!filmCues) {
+  const result = await fetchCues(movie.title, movie.year);
+  if (!result) {
     warnings.push(`${movie.title} (${movie.year}): transcript not found in cache`);
     continue;
   }
-  if (filmCues.length < MIN_CUES) {
-    warnings.push(`${movie.title} (${movie.year}): only ${filmCues.length} cues`);
+  if (result.fallback) {
+    fallbackFilms.push(`${movie.title} (${movie.year})`);
   }
-  filmCues.forEach((text, idx) => cues.push({ movieId, idx, text }));
+  if (result.cues.length < MIN_CUES) {
+    warnings.push(`${movie.title} (${movie.year}): only ${result.cues.length} cues`);
+  }
+  result.cues.forEach((text, idx) => cues.push({ movieId, idx, text }));
   films += 1;
 }
 
@@ -37,8 +41,12 @@ await writeJsonl(resolve(DATA_DIR, 'cues.jsonl'), cues);
 await writeJson(resolve(DATA_DIR, 'extract-report.json'), {
   films,
   cues: cues.length,
+  fallbackFilms,
   warnings,
 });
 
-log.info(`extract: ${films}/${slice.length} films, ${cues.length} cues`);
+log.info(
+  `extract: ${films}/${slice.length} films, ${cues.length} cues` +
+    (fallbackFilms.length > 0 ? `, ${fallbackFilms.length} via sentence fallback` : ''),
+);
 for (const w of warnings) log.warn(w);

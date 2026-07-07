@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { extractDivByClass, splitCues } from '../src/util/html.js';
+import { extractDivByClass, sentenceCues, splitCues } from '../src/util/html.js';
 
 const page = readFileSync(resolve(import.meta.dirname, 'fixtures/script-page.html'), 'utf8');
 
@@ -26,5 +26,25 @@ describe('splitCues', () => {
     expect(cues[0]).toBe("- What's your name again?");
     expect(cues).toContain("How come the sun didn't");
     expect(cues.every((c) => c.length > 0 && !c.includes('<'))).toBe(true);
+  });
+});
+
+describe('sentenceCues', () => {
+  it('splits a structureless blob into sentences with speaker names removed', () => {
+    const blob =
+      '1 Part 1 JUSTINE Sir... You can back up a little more if you want. ' +
+      "I don't think he can hear you. MICHAEL Can you copy, sailor? Stop there, sir.";
+    const cues = sentenceCues(blob);
+    expect(cues).toEqual([
+      'Sir...',
+      'You can back up a little more if you want.',
+      "I don't think he can hear you.",
+      'Can you copy, sailor?',
+      'Stop there, sir.',
+    ]);
+  });
+
+  it('keeps single capital I and short words intact', () => {
+    expect(sentenceCues('I know. A dog ate it.')).toEqual(['I know.', 'A dog ate it.']);
   });
 });
