@@ -68,7 +68,31 @@ const LINES_COLUMNS = `
   INDEX idx_text_norm text_norm TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4
 `;
 
+// Analytics tables hold live data written by the app; they are created once
+// and never take part in the staging swap, so reloads cannot clear them.
+const ANALYTICS_TABLES = [
+  `CREATE TABLE IF NOT EXISTS search_log (
+    ts DateTime,
+    query String,
+    query_norm String,
+    hits UInt16,
+    strong UInt16,
+    had_movie UInt8,
+    took_ms UInt16,
+    visitor_hash UInt64
+  ) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 180 DAY`,
+  `CREATE TABLE IF NOT EXISTS pageviews (
+    ts DateTime,
+    path String,
+    referrer String,
+    visitor_hash UInt64
+  ) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 180 DAY`,
+];
+
 async function createTables(ch: ClickHouseClient): Promise<void> {
+  for (const query of ANALYTICS_TABLES) {
+    await ch.command({ query });
+  }
   await ch.command({
     query: `CREATE TABLE IF NOT EXISTS movies (${MOVIES_COLUMNS}) ENGINE = MergeTree ORDER BY id`,
   });
