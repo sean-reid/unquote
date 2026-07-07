@@ -1,0 +1,352 @@
+[
+  {
+    "query": "may the force be with you",
+    "expectFilm": "star wars|phantom menace|rogue one|revenge of the sith|attack of the clones",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "franchise catchphrase"
+  },
+  {
+    "query": "i'm going to make him an offer he can't refuse",
+    "expectFilm": "godfather",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "I'll make him an offer he can't refuse",
+    "expectFilm": "godfather",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "popular paraphrase"
+  },
+  {
+    "query": "you're gonna need a bigger boat",
+    "expectFilm": "jaws",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "we're gonna need a bigger boat",
+    "expectFilm": "jaws",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "popular misquote, we're for you're"
+  },
+  {
+    "query": "say what again i dare you",
+    "expectFilm": "pulp fiction",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "compressed"
+  },
+  {
+    "query": "life is like a box of chocolates",
+    "expectFilm": "forrest gump",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "popular shortening"
+  },
+  {
+    "query": "stupid is as stupid does",
+    "expectFilm": "forrest gump",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "the first rule of fight club",
+    "expectFilm": "fight club",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "phrase prefix"
+  },
+  {
+    "query": "i'm the king of the world",
+    "expectFilm": "titanic",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "there is no spoon",
+    "expectFilm": "matrix",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "red pill or blue pill",
+    "expectFilm": "matrix",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "paraphrase of the choice"
+  },
+  {
+    "query": "my precious",
+    "expectFilm": "lord of the rings|hobbit",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "fly you fools",
+    "expectFilm": "fellowship of the ring",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim, often misquoted as run"
+  },
+  {
+    "query": "run you fools",
+    "expectFilm": "fellowship of the ring",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "popular misquote of fly"
+  },
+  {
+    "query": "are you not entertained",
+    "expectFilm": "gladiator",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "hasta la vista baby",
+    "expectFilm": "terminator",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "i'll be back",
+    "expectFilm": "terminator",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "short and common; popularity should surface terminator"
+  },
+  {
+    "query": "roads where we're going we don't need roads",
+    "expectFilm": "back to the future",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "near verbatim"
+  },
+  {
+    "query": "to infinity and beyond",
+    "expectFilm": "toy story",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "we need to go deeper",
+    "expectFilm": "inception",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "meme phrasing of we have to go deeper"
+  },
+  {
+    "query": "do not go gentle into that good night",
+    "expectFilm": "interstellar",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "recited poem"
+  },
+  {
+    "query": "get busy living or get busy dying",
+    "expectFilm": "shawshank",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "you talking to me",
+    "expectFilm": "taxi driver",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim, popularity tie-break test"
+  },
+  {
+    "query": "a census taker once tried to test me",
+    "expectFilm": "silence of the lambs",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "i ate his liver with some fava beans and a nice bottle of chianti",
+    "expectFilm": "silence of the lambs",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "misquote, bottle of never said"
+  },
+  {
+    "query": "yippee ki yay",
+    "expectFilm": "die hard",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "catchphrase"
+  },
+  {
+    "query": "welcome to the party pal",
+    "expectFilm": "die hard",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "ogres are like onions",
+    "expectFilm": "shrek",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "you can't handle the truth",
+    "expectFilm": "a few good men",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, film may be outside slice"
+  },
+  {
+    "query": "they may take our lives but they'll never take our freedom",
+    "expectFilm": "braveheart",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "near verbatim"
+  },
+  {
+    "query": "i see you",
+    "expectFilm": "avatar",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "short common phrase, popularity test"
+  },
+  {
+    "query": "here's johnny",
+    "expectFilm": "shining",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "verbatim"
+  },
+  {
+    "query": "redrum",
+    "expectFilm": "shining",
+    "expectInTop": 3,
+    "mustBeInCorpus": true,
+    "note": "spoken repeatedly; the typed page line is barely dialogue"
+  },
+  {
+    "query": "luke i am your father",
+    "expectFilm": "empire strikes back",
+    "expectInTop": 5,
+    "mustBeInCorpus": false,
+    "note": "famous misquote, film missing until rescue pass"
+  },
+  {
+    "query": "no i am your father",
+    "expectFilm": "empire strikes back",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "actual line, film missing until rescue pass"
+  },
+  {
+    "query": "why so serious",
+    "expectFilm": "^the dark knight$",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "film missing until rescue pass"
+  },
+  {
+    "query": "what's in the box",
+    "expectFilm": "^se7en$|^seven$",
+    "expectInTop": 5,
+    "mustBeInCorpus": false,
+    "note": "film missing until rescue pass"
+  },
+  {
+    "query": "play it again sam",
+    "expectFilm": "casablanca",
+    "expectInTop": 5,
+    "mustBeInCorpus": false,
+    "note": "famous misquote, full corpus film"
+  },
+  {
+    "query": "here's looking at you kid",
+    "expectFilm": "casablanca",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, full corpus film"
+  },
+  {
+    "query": "frankly my dear i don't give a damn",
+    "expectFilm": "gone with the wind",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, full corpus film"
+  },
+  {
+    "query": "toto i've a feeling we're not in kansas anymore",
+    "expectFilm": "wizard of oz",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, full corpus film"
+  },
+  {
+    "query": "toto i don't think we're in kansas anymore",
+    "expectFilm": "wizard of oz",
+    "expectInTop": 5,
+    "mustBeInCorpus": false,
+    "note": "popular misquote"
+  },
+  {
+    "query": "magic mirror on the wall",
+    "expectFilm": "^snow white and the seven dwarfs$",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "actual line, full corpus film"
+  },
+  {
+    "query": "if you build it he will come",
+    "expectFilm": "field of dreams",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, full corpus film"
+  },
+  {
+    "query": "greed for lack of a better word is good",
+    "expectFilm": "^wall street$",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, full corpus film"
+  },
+  {
+    "query": "you've got to ask yourself one question do i feel lucky",
+    "expectFilm": "dirty harry",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, full corpus film"
+  },
+  {
+    "query": "i'm as mad as hell and i'm not going to take this anymore",
+    "expectFilm": "^network$",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, full corpus film"
+  },
+  {
+    "query": "inconceivable",
+    "expectFilm": "princess bride",
+    "expectInTop": 5,
+    "mustBeInCorpus": false,
+    "note": "single word, hard, popularity test"
+  },
+  {
+    "query": "nobody puts baby in a corner",
+    "expectFilm": "dirty dancing",
+    "expectInTop": 3,
+    "mustBeInCorpus": false,
+    "note": "verbatim, full corpus film"
+  }
+]
