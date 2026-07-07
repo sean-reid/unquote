@@ -4,7 +4,7 @@ Offline data pipeline. Each stage is a standalone script that reads and writes a
 
 ## Stages
 
-Run from this package with `pnpm exec tsx src/stages/<stage>.ts`, in order:
+Run from this package with `pnpm <stage>`, in order:
 
 | Stage        | Reads                             | Writes                                                       |
 | ------------ | --------------------------------- | ------------------------------------------------------------ |
@@ -30,12 +30,12 @@ Quality: every film gets a transcript health score (punctuation density, diction
 
 ## GPU embedder
 
-`python/embed.py` is a sentence-transformers port of the embed stage that runs on the Apple GPU (MPS). Same artifacts, same row alignment, resumable the same way. Use it for full-corpus runs and the 768d phase; the transformers.js stage remains the reference implementation and the source of the web app's query encoding.
+`python/embed.py` is a sentence-transformers port of the embed stage that runs on the Apple GPU (MPS). Same artifacts, same row alignment, resumable from the same checkpoint file. `pnpm embed` wraps it (dependency sync included); on a machine without MPS it drops to CPU torch by itself and says so in its first line of output. A broken Python environment fails loudly instead of falling back; that is deliberate, so a setup problem cannot silently turn a 40 minute run into a 2 hour one. In that case read the error, or run `pnpm embed:cpu`.
+
+For custom flags (model, pooling, batch size), invoke it directly:
 
 ```bash
-cd python
-uv sync
-uv run embed.py --input ../data/utterances.jsonl --output ../data/embeddings.bin
+uv run --project python python/embed.py --input data/utterances.jsonl --output data/embeddings.bin --model BAAI/bge-base-en-v1.5
 ```
 
 Two rules before trusting any new runtime or model change:
