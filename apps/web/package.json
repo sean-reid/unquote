@@ -13,6 +13,8 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@clickhouse/client": "^1.23.1",
+    "@huggingface/transformers": "^4.2.0",
     "@unquote/shared": "workspace:*"
   },
   "devDependencies": {
