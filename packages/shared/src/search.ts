@@ -17,6 +17,32 @@ export interface SearchHit {
   arms: SearchArm[];
   /** How many times this film says this exact line; hits are deduped to the best occurrence. */
   occurrences: number;
+  /** True when this hit looks like what the user was trying to remember, a few words off. */
+  nearMiss?: boolean;
+}
+
+/** A curated famous misquote matched against the query. */
+export interface MisquoteMatch {
+  popular: string;
+  actual: string;
+  film: string;
+  year: number | null;
+}
+
+/** Corpus-wide statistics for a common phrase, shown as the phrase card. */
+export interface PhraseStats {
+  films: number;
+  occurrences: number;
+  firstTitle: string;
+  firstYear: number;
+  /** Ten buckets over film position, 0-10% through 90-100%. */
+  arcBuckets: number[];
+  /**
+   * Full corpus decade range, zero-filled. share = films saying the phrase
+   * over films in the corpus for that decade, so uneven corpus coverage per
+   * decade cannot masquerade as a usage trend.
+   */
+  decades: Array<{ decade: number; films: number; corpusFilms: number; share: number }>;
 }
 
 export interface MovieMatch {
@@ -34,6 +60,10 @@ export interface SearchResponse {
   strongCount: number;
   /** Present when the query names a film. */
   movie: MovieMatch | null;
+  /** Present when the query matches a curated famous misquote. */
+  misquote?: MisquoteMatch | null;
+  /** Present when the query is a phrase common across many films. */
+  phrase?: PhraseStats | null;
 }
 
 /**
