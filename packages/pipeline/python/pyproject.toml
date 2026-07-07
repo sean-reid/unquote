@@ -1,0 +1,10 @@
+[project]
+name = "unquote-embed"
+version = "0.1.0"
+description = "GPU embedder for the unquote pipeline"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "sentence-transformers>=3.3,<4",
+    "torch>=2.5",
+    "numpy>=1.26",
+]
