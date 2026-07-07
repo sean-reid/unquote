@@ -15,6 +15,8 @@ export interface SearchHit {
   score: number;
   /** Arms that surfaced this hit. */
   arms: SearchArm[];
+  /** How many times this film says this exact line; hits are deduped to the best occurrence. */
+  occurrences: number;
 }
 
 export interface MovieMatch {
