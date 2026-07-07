@@ -1,3 +1,5 @@
+import { existsSync, createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
 import { DATA_DIR } from '../config.js';
 import { readJson, writeJson } from '../util/fs.js';
@@ -14,6 +16,18 @@ const scripts = await readJson<ScriptRecord[]>(resolve(DATA_DIR, 'scripts.json')
 const withTranscript = new Set(
   scripts.filter((s) => s.source === 'springfield').map((s) => s.movieId),
 );
+
+// Rescued films (imsdb, subslikescript) are not in scripts.json; a full run
+// must include every film the rescue passes shipped cues for.
+const rescuePath = resolve(DATA_DIR, 'cues-rescue.jsonl');
+if (full && existsSync(rescuePath)) {
+  const before = withTranscript.size;
+  const rl = createInterface({ input: createReadStream(rescuePath) });
+  for await (const line of rl) {
+    withTranscript.add((JSON.parse(line) as { movieId: number }).movieId);
+  }
+  log.info(`slice: ${withTranscript.size - before} rescued films joined the full set`);
+}
 
 const ranked = movies
   .filter((m) => withTranscript.has(m.id))
