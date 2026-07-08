@@ -9,6 +9,11 @@
 
   let query = $derived(data.response?.query ?? '');
   let phraseOpen = $derived(browser ? !window.matchMedia('(max-width: 480px)').matches : true);
+  // Placeholder text cannot respond to CSS; narrow screens get shorter words.
+  const compact = $derived(browser && window.matchMedia('(max-width: 480px)').matches);
+  const placeholder = $derived(
+    compact ? 'A line, or describe a scene' : 'A line you remember, or a scene you can describe',
+  );
 
   const hasResults = $derived(data.response !== null && data.response.hits.length > 0);
   const searched = $derived(data.response !== null);
@@ -49,15 +54,14 @@
         name="q"
         bind:value={query}
         oninput={onInput}
-        placeholder="A line you remember, or a scene you can describe"
+        {placeholder}
         aria-label="Search movie dialogue"
         autocomplete="off"
       />
     </form>
     {#if !searched && data.filmCount}
       <p class="corpus-note">
-        Searching {data.filmCount.toLocaleString('en-US')} films while the full library loads in. More
-        every week.
+        Searching the dialogue of {data.filmCount.toLocaleString('en-US')} films.
       </p>
     {/if}
   </header>
