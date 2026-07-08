@@ -75,10 +75,24 @@ function isCreditCard(u: Utterance): boolean {
   return false;
 }
 
+// Pure idf worships proper-noun roll calls ("Wehrmacht 346 lnfantry, von Luck
+// Kampfgruppe" was Saving Private Ryan's top line). A memorable line has rare
+// anchors inside common sentence structure, so demand the structure.
+function hasSentenceShape(u: Utterance, tokens: string[]): boolean {
+  if (/^["'”’“]/.test(u.text.trim())) return false; // orphaned quote fragment
+  if (tokens.some((t) => /\d/.test(t))) return false; // unit numbers, dates
+  const words = u.text.split(/\s+/);
+  const capitalized = words.slice(1).filter((w) => /^[A-Z]/.test(w)).length;
+  if (capitalized / Math.max(words.length - 1, 1) > 0.4) return false; // name lists
+  const common = tokens.filter((t) => (df.get(t) ?? 0) > filmCount * 0.2).length;
+  return common / tokens.length >= 0.4; // enough everyday words to read as speech
+}
+
 function distinctiveness(u: Utterance, tokens: string[]): number {
   if (u.text.length < MIN_CHARS || u.text.length > MAX_CHARS) return -1;
   if (tokens.length < 4) return -1;
   if (isCreditCard(u)) return -1;
+  if (!hasSentenceShape(u, tokens)) return -1;
   const score = tokens.reduce((sum, token) => sum + idf(token), 0);
   return score / Math.sqrt(tokens.length);
 }
