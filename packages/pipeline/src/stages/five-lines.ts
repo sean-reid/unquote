@@ -58,9 +58,27 @@ function idf(token: string): number {
   return Math.log(filmCount / (1 + (df.get(token) ?? 0)));
 }
 
+// Dedications and credit cards live at the arc extremes and read as rare
+// vocabulary, which idf scoring otherwise adores (Scarface's "dedicated to
+// HOWARD HAWKS and BEN HECH" scored a slot at 100% through).
+const ARC_MARGIN = 0.02;
+const CREDIT_TEXT =
+  /\b(dedicated to|in (loving )?memory|subtitles? by|directed by|produced by|screenplay by|based (up)?on the)\b/i;
+
+function isCreditCard(u: Utterance): boolean {
+  if (CREDIT_TEXT.test(u.text)) return true;
+  if (u.arc > 1 - ARC_MARGIN || u.arc < ARC_MARGIN) {
+    const letters = u.text.replace(/[^a-zA-Z]/g, '');
+    const upper = letters.replace(/[^A-Z]/g, '');
+    if (letters.length > 0 && upper.length / letters.length > 0.5) return true;
+  }
+  return false;
+}
+
 function distinctiveness(u: Utterance, tokens: string[]): number {
   if (u.text.length < MIN_CHARS || u.text.length > MAX_CHARS) return -1;
   if (tokens.length < 4) return -1;
+  if (isCreditCard(u)) return -1;
   const score = tokens.reduce((sum, token) => sum + idf(token), 0);
   return score / Math.sqrt(tokens.length);
 }
