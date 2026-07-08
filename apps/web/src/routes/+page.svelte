@@ -135,7 +135,7 @@
 
       {#if data.response!.movie}
         {@const movie = data.response!.movie}
-        <a class="movie-banner" href="/movie/{movie.movieId}">
+        <a class="movie-banner" href={resolve(`/movie/${movie.movieId}`)}>
           {#if posterUrl(movie.posterPath)}
             <img src={posterUrl(movie.posterPath)} alt="" width="46" height="69" />
           {/if}
