@@ -4,6 +4,7 @@ import {
   cleanCueText,
   isMusicCue,
   lyricRunMask,
+  splitLongText,
   splitTurns,
   unmarkedLyricMask,
 } from '../src/util/utterances.js';
@@ -255,5 +256,69 @@ describe('quote-wrapped singing convention', () => {
     expect(mask[3]).toBe(true);
     expect(mask[0]).toBe(false);
     expect(mask[6]).toBe(false);
+  });
+});
+
+describe('dash-masked speaker labels', () => {
+  it('strips a label hidden behind a dash turn marker', () => {
+    const { texts } = buildUtterances(['- ANNE: Abigail, do you think the people are angry?']);
+    expect(texts).toEqual(['Abigail, do you think the people are angry?']);
+  });
+
+  it('strips labels from both sides of a dual-speaker cue', () => {
+    const { texts } = buildUtterances(['- ANNE: Yes, I do. - SARAH: They are not.']);
+    expect(texts).toEqual(['Yes, I do.', 'They are not.']);
+  });
+
+  it('leaves dash turns without labels alone', () => {
+    const { texts } = buildUtterances(['- He was a well-known man.']);
+    expect(texts).toEqual(['He was a well-known man.']);
+  });
+});
+
+describe('splitLongText', () => {
+  it('passes short text through untouched', () => {
+    expect(splitLongText('Take your knives and throw them into the sea.')).toEqual([
+      'Take your knives and throw them into the sea.',
+    ]);
+  });
+
+  it('splits a paragraph cue at sentence boundaries near the cap', () => {
+    const paragraph =
+      'Mandela has traveled to Durban in an effort to persuade one hundred thousand angry ' +
+      'young supporters to make peace. Take your knives and your guns and throw them into the sea. ' +
+      'After four years of talks the day black South Africans have been fighting for has finally ' +
+      'arrived. For the first time they are free to cast their vote along side whites. And an ' +
+      'estimated twenty three million people went to the polls today. Never, never and never ' +
+      'again shall it be that this beautiful land will again experience the oppression of one ' +
+      'by another and suffer the indignity of being the skunk of the world.';
+    const { texts } = buildUtterances([paragraph]);
+    expect(texts.length).toBeGreaterThan(1);
+    for (const text of texts) {
+      expect(text.length).toBeLessThanOrEqual(280);
+    }
+    expect(texts[0]).toMatch(/^Mandela has traveled/);
+    expect(texts.join(' ')).toContain('skunk of the world');
+    for (const text of texts) {
+      expect(text).toMatch(/^[A-Z"']/);
+    }
+  });
+
+  it('falls back to commas and spaces when punctuation is missing', () => {
+    const runOn = Array(20).fill('they cheer for the team and wave the flags').join(', ');
+    const chunks = splitLongText(runOn);
+    expect(chunks.length).toBeGreaterThan(2);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(280);
+    }
+    expect(chunks.join(', ').replace(/, ,/g, ',')).toBeTruthy();
+  });
+});
+
+describe('label-only cues', () => {
+  it('drops a cue that is nothing but a speaker label', () => {
+    const { texts, dropped } = buildUtterances(['WOMAN:', 'I know, I did.']);
+    expect(texts).toEqual(['I know, I did.']);
+    expect(dropped.empty).toBe(1);
   });
 });

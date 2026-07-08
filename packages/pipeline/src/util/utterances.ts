@@ -136,6 +136,8 @@ export function cleanCueText(raw: string): string {
       .replace(/\s*\([A-Z][A-Z\s,]*$/, '') // orphaned trailing "(CHEERING"
       .replace(/[|@]+/g, ' ') // stray subtitle markers
       .replace(SPEAKER_LABEL, '')
+      // A cue that is nothing but a speaker label ('WOMAN:') names, says nothing.
+      .replace(/^[A-Z][A-Za-z'.]*(?:\s+[A-Z][A-Za-z'.]*){0,2}:$/, '')
       .replace(/([a-z])"([a-z])/g, "$1'$2") // it"s -> it's
       // Subtitle OCR confuses "l" and "I": mid-word capital I is really l
       // (wouIdn't, feII, kiIIed), and a leading lowercase l is really I (l'm).
@@ -166,11 +168,55 @@ export function splitTurns(cue: string): Turn[] {
     return [{ text: cue, newSpeaker: false }];
   }
   const body = cue.replace(/^[-–]\s*/, '');
-  return body
-    .split(/\s[-–]\s+(?=\S)/)
-    .map((text) => text.trim())
-    .filter((text) => text.length > 0)
-    .map((text) => ({ text, newSpeaker: true }));
+  return (
+    body
+      .split(/\s[-–]\s+(?=\S)/)
+      .map((text) => text.trim())
+      // A dash hides the label from the cue-level strip ("- ANNE: Abigail...");
+      // each turn starts a speaker, so strip again here.
+      .map((text) => text.replace(SPEAKER_LABEL, ''))
+      .filter((text) => text.length > 0)
+      .map((text) => ({ text, newSpeaker: true }))
+  );
+}
+
+/**
+ * A single cue can arrive as a whole paragraph (fallback-extracted films ship
+ * entire scenes in one cue). Split at sentence boundaries into chunks near the
+ * cap, falling back to commas and then to the last space when the source has
+ * no usable punctuation.
+ */
+export function splitLongText(text: string, cap = MAX_UTTERANCE_CHARS): string[] {
+  if (text.length <= cap) return [text];
+  const sentences = text.split(/(?<=[.?!…]["'”’]?)\s+/);
+  const chunks: string[] = [];
+  let current = '';
+  const push = (): void => {
+    if (current.length > 0) chunks.push(current);
+    current = '';
+  };
+  const hardSplit = (piece: string): void => {
+    let rest = piece;
+    while (rest.length > cap) {
+      const comma = rest.lastIndexOf(', ', cap);
+      const space = rest.lastIndexOf(' ', cap);
+      const cut = comma > cap / 2 ? comma + 1 : space > 0 ? space : cap;
+      chunks.push(rest.slice(0, cut).trim());
+      rest = rest.slice(cut).trim();
+    }
+    if (rest.length > 0) chunks.push(rest);
+  };
+  for (const sentence of sentences) {
+    if (sentence.length > cap) {
+      push();
+      hardSplit(sentence);
+      continue;
+    }
+    if (current.length + sentence.length + 1 > cap) push();
+    current = current.length === 0 ? sentence : `${current} ${sentence}`;
+  }
+  push();
+  return chunks;
 }
 
 export interface BuildResult {
@@ -219,6 +265,16 @@ export function buildUtterances(cues: string[], options: BuildOptions = {}): Bui
       return;
     }
     for (const turn of splitTurns(cleaned)) {
+      // A paragraph-sized single turn never merges; it splits into its own
+      // utterances at sentence boundaries.
+      if (turn.text.length > MAX_UTTERANCE_CHARS) {
+        flush();
+        for (const piece of splitLongText(turn.text)) {
+          buffer = piece;
+          flush();
+        }
+        continue;
+      }
       if (buffer.length === 0) {
         buffer = turn.text;
         continue;
