@@ -237,19 +237,22 @@
     "popular": "I'll be back",
     "actual": "I'll be back.",
     "film": "The Terminator",
-    "year": 1984
+    "year": 1984,
+    "note": "Said first and most famously here, then quoted by half of cinema."
   },
   {
     "popular": "I'm the king of the world",
     "actual": "I'm the king of the world!",
     "film": "Titanic",
-    "year": 1997
+    "year": 1997,
+    "note": "The line everyone knows from the bow of the ship."
   },
   {
     "popular": "No, I am your father",
     "actual": "No, I am your father.",
     "film": "The Empire Strikes Back",
-    "year": 1980
+    "year": 1980,
+    "note": "The real phrasing of the most misquoted line in film; no Luke in it."
   },
   {
     "popular": "You know what's cooler than a million dollars? A billion dollars",
@@ -339,6 +342,7 @@
     "popular": "Go ahead, make my day",
     "actual": "Go ahead, make my day.",
     "film": "Sudden Impact",
-    "year": 1983
+    "year": 1983,
+    "note": "Often credited to Dirty Harry; it is from the fourth film, Sudden Impact."
   }
 ]
