@@ -614,7 +614,7 @@ export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
       format: 'JSONEachRow',
     });
     if (Number(((await flagged.json()) as Array<{ n: string | number }>)[0]?.n) > 0) {
-      return EMPTY_BRIDGE;
+      return [EMPTY_BRIDGE];
     }
 
     const [beatsA, beatsB] = await Promise.all([bridgeBeats(a), bridgeBeats(b)]);
