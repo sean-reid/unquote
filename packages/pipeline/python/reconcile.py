@@ -16,6 +16,10 @@ Usage:
 The old bin's sibling meta json names the model; the run refuses to mix
 models. A final spot check re-encodes 5 copied and 5 fresh rows and requires
 cosine agreement of at least 0.9999.
+
+Work happens in a file-backed .partial sibling with progress checkpointed
+every few batches, so a killed run resumes where it left off instead of
+starting over; the out bin only appears once the spot check passes.
 """
 
 import argparse
@@ -85,11 +89,35 @@ def main() -> None:
     copied = total - len(fresh_rows)
     print(f"{total} rows: {copied} copied, {len(fresh_rows)} to embed", flush=True)
 
-    out = np.empty((total, dim), dtype="<f4")
-    for i, text in enumerate(new_texts):
-        j = old_index.get(text)
-        if j is not None:
-            out[i] = old[j]
+    partial = args.out_bin.with_name(args.out_bin.name + ".partial")
+    progress_path = args.out_bin.with_suffix(".progress.json")
+    fingerprint = {
+        "model": model_name,
+        "dim": dim,
+        "total": total,
+        "fresh": len(fresh_rows),
+        "new_jsonl_bytes": args.new_jsonl.stat().st_size,
+    }
+
+    embedded = 0
+    if progress_path.exists() and partial.exists():
+        saved = json.loads(progress_path.read_text())
+        if (
+            saved.get("fingerprint") == fingerprint
+            and partial.stat().st_size == total * dim * 4
+        ):
+            embedded = int(saved["embedded"])
+            print(f"resuming: {embedded}/{len(fresh_rows)} fresh rows already embedded", flush=True)
+
+    resume = embedded > 0
+    out = np.memmap(partial, dtype="<f4", mode="r+" if resume else "w+", shape=(total, dim))
+    if not resume:
+        for i, text in enumerate(new_texts):
+            j = old_index.get(text)
+            if j is not None:
+                out[i] = old[j]
+        out.flush()
+        progress_path.write_text(json.dumps({"fingerprint": fingerprint, "embedded": 0}))
 
     if fresh_rows:
         device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -99,7 +127,7 @@ def main() -> None:
         pooling.pooling_mode_cls_token = args.pooling == "cls"
         pooling.pooling_mode_mean_tokens = args.pooling == "mean"
         started = time.time()
-        for start in range(0, len(fresh_rows), args.batch):
+        for start in range(embedded, len(fresh_rows), args.batch):
             rows = fresh_rows[start : start + args.batch]
             vectors = model.encode(
                 [new_texts[i] for i in rows],
@@ -109,16 +137,20 @@ def main() -> None:
                 show_progress_bar=False,
             )
             out[rows] = vectors.astype("<f4")
-            if (start // args.batch) % 40 == 0:
-                rate = (start + len(rows)) / max(time.time() - started, 1e-9)
-                print(f"{start + len(rows)}/{len(fresh_rows)} ({rate:.0f}/s)", flush=True)
+            done = start + len(rows)
+            if (start // args.batch) % 10 == 0 or done == len(fresh_rows):
+                out.flush()
+                progress_path.write_text(json.dumps({"fingerprint": fingerprint, "embedded": done}))
+                if device == "mps":
+                    # The MPS caching allocator grows without bound on
+                    # varying-length batches; drop it or the kernel drops us.
+                    torch.mps.empty_cache()
+                rate = (done - embedded) / max(time.time() - started, 1e-9)
+                print(f"{done}/{len(fresh_rows)} ({rate:.0f}/s)", flush=True)
     else:
         model = None
 
-    out.tofile(args.out_bin)
-    args.out_bin.with_suffix(".meta.json").write_text(
-        json.dumps({"model": model_name, "dim": dim, "count": total})
-    )
+    out.flush()
 
     # Spot check: re-encode a handful of copied and fresh rows directly.
     if model is None:
@@ -145,6 +177,13 @@ def main() -> None:
         if worst < 0.9999:
             print("spot check FAILED; do not trust this bin", file=sys.stderr)
             sys.exit(1)
+
+    del out
+    partial.replace(args.out_bin)
+    args.out_bin.with_suffix(".meta.json").write_text(
+        json.dumps({"model": model_name, "dim": dim, "count": total})
+    )
+    progress_path.unlink(missing_ok=True)
     print(f"done: {copied} copied, {len(fresh_rows)} embedded")
 
 
