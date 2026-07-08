@@ -72,9 +72,7 @@
         {@const misquote = data.response!.misquote}
         <div class="misquote">
           <p class="misquote-label">
-            {normalize(misquote.popular) === normalize(misquote.actual)
-              ? 'The famous one'
-              : 'Commonly misquoted'}
+            {misquote.kind === 'signature' ? 'The famous one' : 'Commonly misquoted'}
           </p>
           <blockquote>
             {#each alignWords(misquote.popular, misquote.actual) as part, i (i)}{i > 0
@@ -84,6 +82,9 @@
           <p class="misquote-film">
             {misquote.film}{#if misquote.year}&nbsp;({misquote.year}){/if}
           </p>
+          {#if misquote.note}
+            <p class="misquote-note">{misquote.note}</p>
+          {/if}
         </div>
       {/if}
 
@@ -322,6 +323,12 @@
     border-radius: var(--radius);
     padding: var(--space-3);
     margin: var(--space-3) 0;
+  }
+
+  .misquote-note {
+    margin: var(--space-1) 0 0;
+    color: var(--text-muted);
+    font-size: 0.8rem;
   }
 
   .misquote-label {

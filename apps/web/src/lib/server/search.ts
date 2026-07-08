@@ -36,7 +36,7 @@ const SEMANTIC_LIMIT = 100;
 const PHRASE_MIN_FILMS = 8;
 
 const misquotesByQuery = new Map<string, MisquoteMatch>(
-  misquoteEntries.map((entry) => [normalize(entry.popular), entry]),
+  (misquoteEntries as MisquoteMatch[]).map((entry) => [normalize(entry.popular), entry]),
 );
 /** rrf scores top out around 0.05; this keeps verbatim hits above any fusion of fuzzy ones. */
 const EXACT_BOOST = 1;

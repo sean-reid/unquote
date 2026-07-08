@@ -23,12 +23,16 @@ export interface SearchHit {
   moment?: boolean;
 }
 
-/** A curated famous misquote matched against the query. */
+/** A curated famous misquote or signature attribution matched against the query. */
 export interface MisquoteMatch {
   popular: string;
   actual: string;
   film: string;
   year: number | null;
+  /** misquote = the film says it differently; signature = right words, badge carries attribution. */
+  kind?: 'misquote' | 'signature';
+  /** One muted line explaining why the entry exists. */
+  note?: string;
 }
 
 /** Corpus-wide statistics for a common phrase, shown as the phrase card. */
