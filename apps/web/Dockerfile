@@ -20,11 +20,12 @@ ENV NODE_ENV=production \
     PORT=3000
 WORKDIR /app
 COPY --from=build /deploy .
-# Bake the query encoder weights into the image so boot never downloads.
-# Model name mirrors EMBED_MODEL in packages/shared/src/embedding.ts.
+# Bake both query encoders' weights into the image so boot never downloads.
+# Names mirror EMBED_MODEL (shared/embedding.ts) and WIDE_EMBED_MODEL (web/embed.ts).
 RUN node --input-type=module -e "\
   const { pipeline } = await import('@huggingface/transformers'); \
-  await pipeline('feature-extraction', 'Xenova/bge-small-en-v1.5', { dtype: 'q8' });"
+  await pipeline('feature-extraction', 'Xenova/bge-small-en-v1.5', { dtype: 'q8' }); \
+  await pipeline('feature-extraction', 'Xenova/bge-base-en-v1.5', { dtype: 'q8' });"
 RUN useradd -r app && chown -R app:app /app
 USER app
 EXPOSE 3000
