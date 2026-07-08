@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Override to test a fresh build when another preview holds the default port.
+const port = Number(process.env.PREVIEW_PORT ?? 4173);
+
 export default defineConfig({
   testDir: 'tests/e2e',
   fullyParallel: true,
@@ -7,7 +10,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: `http://localhost:${port}`,
     trace: 'on-first-retry',
   },
   projects: [
@@ -15,8 +18,8 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['iPhone 13'] } },
   ],
   webServer: {
-    command: 'pnpm build && pnpm preview',
-    port: 4173,
+    command: `pnpm build && pnpm preview --port ${port} --strictPort`,
+    port,
     reuseExistingServer: !process.env.CI,
   },
 });

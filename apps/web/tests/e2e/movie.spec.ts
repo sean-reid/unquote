@@ -77,6 +77,7 @@ test('a seq deep link opens the panel on load', async ({ page }) => {
   );
   await page.goto(`/movie/${filmId}?seq=${seq}`);
   await expect(page.locator('.panel')).toBeVisible();
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
   await expect(page.locator('.neighbor').first()).toBeVisible();
 });
 
@@ -88,6 +89,21 @@ test('the bridge page lays two films side by side', async ({ page }, testInfo) =
   if (testInfo.project.name === 'desktop') {
     await page.screenshot({ path: testInfo.outputPath('bridge-desktop.png'), fullPage: true });
   }
+});
+
+test('an unrelated pair shows the honest empty state', async ({ page }) => {
+  test.skip(pairA === 0, 'movie_pairs not loaded');
+  // Toy Story and Se7en share a corpus, not moments.
+  await page.goto('/movie/862/vs/807');
+  await expect(page.locator('.empty')).toContainText('keep their distance');
+  await expect(page.locator('.pair')).toHaveCount(0);
+});
+
+test('bridge pairs never repeat a moment', async ({ page }) => {
+  test.skip(pairA === 0, 'movie_pairs not loaded');
+  await page.goto(`/movie/${pairA}/vs/${pairB}`);
+  const excerpts = await page.locator('.pair blockquote').allTextContents();
+  expect(new Set(excerpts).size).toBe(excerpts.length);
 });
 
 test('search results link into the moment', async ({ page }) => {
