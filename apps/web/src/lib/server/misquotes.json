@@ -238,5 +238,23 @@
     "actual": "Elementary, my dear fellow.",
     "film": "The Return of Sherlock Holmes",
     "year": 1929
+  },
+  {
+    "popular": "I'll be back",
+    "actual": "I'll be back.",
+    "film": "The Terminator",
+    "year": 1984
+  },
+  {
+    "popular": "I'm the king of the world",
+    "actual": "I'm the king of the world!",
+    "film": "Titanic",
+    "year": 1997
+  },
+  {
+    "popular": "No, I am your father",
+    "actual": "I am your father.",
+    "film": "The Empire Strikes Back",
+    "year": 1980
   }
 ]

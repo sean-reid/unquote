@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { alignWords } from '@unquote/shared';
+  import { alignWords, normalize } from '@unquote/shared';
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
@@ -67,7 +67,11 @@
       {#if data.response!.misquote}
         {@const misquote = data.response!.misquote}
         <div class="misquote">
-          <p class="misquote-label">Commonly misquoted</p>
+          <p class="misquote-label">
+            {normalize(misquote.popular) === normalize(misquote.actual)
+              ? 'The famous one'
+              : 'Commonly misquoted'}
+          </p>
           <blockquote>
             {#each alignWords(misquote.popular, misquote.actual) as part, i (i)}{i > 0
                 ? ' '
