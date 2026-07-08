@@ -200,7 +200,14 @@ async function swap(ch: ClickHouseClient): Promise<void> {
   console.log('materializing vector index...');
   await ch.command({
     query: 'ALTER TABLE lines_staging MATERIALIZE INDEX vec_idx',
-    clickhouse_settings: { allow_experimental_vector_similarity_index: 1, mutations_sync: '2' },
+    clickhouse_settings: {
+      allow_experimental_vector_similarity_index: 1,
+      mutations_sync: '2',
+      // The index build can outlive the socket idle timeout; progress
+      // headers keep the connection alive for however long it takes.
+      send_progress_in_http_headers: 1,
+      http_headers_progress_interval_ms: '20000',
+    },
   });
   await ch.command({ query: 'EXCHANGE TABLES movies_staging AND movies' });
   await ch.command({ query: 'EXCHANGE TABLES lines_staging AND lines' });

@@ -58,6 +58,7 @@ async function createTables(ch: ClickHouseClient, dim: number): Promise<void> {
     movie_pairs: `(movie_id UInt32, rank UInt8, similar_id UInt32, score Float32) ENGINE = MergeTree ORDER BY (movie_id, rank)`,
     movie_map: `(movie_id UInt32, x Float32, y Float32) ENGINE = MergeTree ORDER BY movie_id`,
     five_lines: `(movie_id UInt32, seqs Array(UInt32)) ENGINE = MergeTree ORDER BY movie_id`,
+    movie_quality: `(movie_id UInt32, downrank UInt8, non_english UInt8, source_kind LowCardinality(String)) ENGINE = MergeTree ORDER BY movie_id`,
   };
   for (const [name, schema] of Object.entries(tables)) {
     await ch.command({
@@ -210,6 +211,22 @@ async function main(): Promise<void> {
     format: 'JSONEachRow',
   });
 
+  // Per-film quality flags. source_kind marks films whose text is a draft
+  // screenplay rather than a transcript of the shot film; the app and the
+  // summary pipeline treat draft wording with less confidence.
+  const quality: Record<string, { downrank: boolean; nonEnglish: boolean; sourceKind?: string }> =
+    JSON.parse(await readFile(path.join(DATA_DIR, 'quality.json'), 'utf8'));
+  await ch.insert({
+    table: 'movie_quality_staging',
+    values: Object.entries(quality).map(([movieId, q]) => ({
+      movie_id: Number(movieId),
+      downrank: q.downrank ? 1 : 0,
+      non_english: q.nonEnglish ? 1 : 0,
+      source_kind: q.sourceKind ?? 'transcript',
+    })),
+    format: 'JSONEachRow',
+  });
+
   // Vector indexes build one table at a time with a hard memory cap; the
   // container shares a small VM and parallel HNSW builds have taken it down.
   for (const name of ['beats', 'segments']) {
@@ -224,11 +241,22 @@ async function main(): Promise<void> {
         allow_experimental_vector_similarity_index: 1,
         mutations_sync: '2',
         max_memory_usage: '3500000000',
+        // The index build can outlive the socket idle timeout; progress
+        // headers keep the connection alive for however long it takes.
+        send_progress_in_http_headers: 1,
+        http_headers_progress_interval_ms: '20000',
       },
     });
   }
 
-  for (const name of ['beats', 'segments', 'movie_pairs', 'movie_map', 'five_lines']) {
+  for (const name of [
+    'beats',
+    'segments',
+    'movie_pairs',
+    'movie_map',
+    'five_lines',
+    'movie_quality',
+  ]) {
     await ch.command({ query: `EXCHANGE TABLES ${name}_staging AND ${name}` });
   }
   await ch.close();

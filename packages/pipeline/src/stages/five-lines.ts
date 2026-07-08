@@ -147,12 +147,32 @@ function distinctiveness(u: Utterance, tokens: string[]): number {
 // each factor over the quintile's candidates so the scales cannot fight.
 const CENTRALITY_WEIGHT = 0.6;
 
+// Five lines about the same character read as a roll call, not a film in
+// miniature (Saving Private Ryan picked Mellish three times). Sharing a name
+// with an earlier pick costs rank positions; it does not disqualify.
+const NAME_REPEAT_PENALTY = 0.5;
+
+function nameTokens(text: string): Set<string> {
+  const names = new Set<string>();
+  const words = text.split(/\s+/);
+  words.forEach((word, i) => {
+    // Any capitalized word counts mid-sentence; at sentence start only a
+    // vocative ("Mellish, check the tower.") is safely a name.
+    if (i === 0 && !/^[A-Z][a-z]{2,},$/.test(word)) return;
+    const m = word.match(/^[A-Z][a-z]{2,}/);
+    if (m) names.add(m[0].toLowerCase());
+  });
+  return names;
+}
+
 const fiveLines: Record<string, number[]> = {};
 for (const [movieId, utterances] of utterancesByFilm) {
   const tokensBySeq = filmTokens.get(movieId)!;
+  const textBySeq = new Map(utterances.map((u) => [u.seq, u.text]));
   const vectors = await filmVectors(movieId);
   const centroid = centroidOf(vectors);
   const picks: number[] = [];
+  const pickedNames = new Set<string>();
   for (let q = 0; q < QUINTILES; q++) {
     const candidates: Array<{ u: Utterance; dist: number; central: number }> = [];
     for (const u of utterances) {
@@ -172,15 +192,21 @@ for (const [movieId, utterances] of utterancesByFilm) {
     let best: Utterance | null = null;
     let bestScore = Number.POSITIVE_INFINITY;
     for (const c of candidates) {
+      const names = nameTokens(c.u.text);
+      const repeatsName = [...names].some((n) => pickedNames.has(n));
       const score =
         CENTRALITY_WEIGHT * centralRank.get(c.u.seq)! +
-        (1 - CENTRALITY_WEIGHT) * distRank.get(c.u.seq)!;
+        (1 - CENTRALITY_WEIGHT) * distRank.get(c.u.seq)! +
+        (repeatsName ? NAME_REPEAT_PENALTY * candidates.length : 0);
       if (score < bestScore) {
         bestScore = score;
         best = c.u;
       }
     }
-    if (best) picks.push(best.seq);
+    if (best) {
+      picks.push(best.seq);
+      for (const n of nameTokens(textBySeq.get(best.seq) ?? '')) pickedNames.add(n);
+    }
   }
   if (picks.length > 0) fiveLines[movieId] = picks;
 }
