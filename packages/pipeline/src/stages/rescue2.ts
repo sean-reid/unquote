@@ -26,6 +26,14 @@ try {
   // No prior rescue file; nothing shipped yet.
 }
 
+// Subslikescript put up an anti-bot JS challenge on 2026-07-07; every fetch
+// 302s to a captcha page. Do not hit the site until it relaxes, and then only
+// by explicit opt-in on top of ALLOW_NETWORK.
+if (process.env.ALLOW_SUBSLIKESCRIPT !== '1') {
+  log.warn('rescue2: subslikescript disabled (anti-bot challenge); set ALLOW_SUBSLIKESCRIPT=1');
+  process.exit(0);
+}
+
 const gaps = movies.filter((m) => !have.has(m.id) && !shipped.has(m.id));
 log.info(`rescue2: ${gaps.length} films still missing (springfield + imsdb covered the rest)`);
 
