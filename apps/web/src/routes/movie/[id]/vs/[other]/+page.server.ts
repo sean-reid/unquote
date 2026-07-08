@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { bridgePairs, movieHeader } from '$lib/server/movie.js';
+import { BRIDGE_HIGH_AMBIENT, bridgePairs, movieHeader } from '$lib/server/movie.js';
 import type { PageServerLoad } from './$types.js';
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -12,5 +12,11 @@ export const load: PageServerLoad = async ({ params }) => {
   const [movieA, movieB] = await Promise.all([movieHeader(a), movieHeader(b)]);
   if (!movieA || !movieB) error(404, 'no such pair');
 
-  return { movieA, movieB, pairs: await bridgePairs(a, b) };
+  const bridge = await bridgePairs(a, b);
+  return {
+    movieA,
+    movieB,
+    pairs: bridge.pairs,
+    soundAlikeThroughout: bridge.pairs.length === 0 && bridge.ambient >= BRIDGE_HIGH_AMBIENT,
+  };
 };
