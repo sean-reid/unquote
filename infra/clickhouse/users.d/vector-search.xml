@@ -1,0 +1,9 @@
+<!-- HNSW reads need this while the index is pre-GA in 25.8; profile-level so
+     scoped users need no per-query settings rights. Drop after the 26.3 upgrade. -->
+<clickhouse>
+  <profiles>
+    <default>
+      <allow_experimental_vector_similarity_index>1</allow_experimental_vector_similarity_index>
+    </default>
+  </profiles>
+</clickhouse>
