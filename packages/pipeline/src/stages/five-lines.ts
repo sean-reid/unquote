@@ -1,0 +1,90 @@
+/**
+ * Pick five arc-spanning distinctive lines per film for the movie page
+ * opener: one per quintile, scored by rarity of vocabulary against the corpus
+ * so catchphrases beat filler.
+ *
+ * Run: pnpm five-lines
+ */
+import { resolve } from 'node:path';
+import { tokenize } from '@unquote/shared';
+import { DATA_DIR } from '../config.js';
+import { readJson, readJsonl, writeJson } from '../util/fs.js';
+import { log } from '../util/log.js';
+import type { Utterance } from '../types.js';
+
+const MIN_CHARS = 25;
+const MAX_CHARS = 120;
+const QUINTILES = 5;
+
+const sliceOnly = process.env.SLICE === '1';
+const sliceIds = new Set(await readJson<number[]>(resolve(DATA_DIR, 'slice.json')));
+
+// Document frequency over films: in how many films does a token appear?
+const filmTokens = new Map<number, Map<number, string[]>>();
+const df = new Map<string, number>();
+const seenIn = new Map<string, number>();
+let filmCount = 0;
+
+for await (const u of readJsonl<Utterance>(resolve(DATA_DIR, 'utterances.jsonl'))) {
+  if (sliceOnly && !sliceIds.has(u.movieId)) continue;
+  let seqs = filmTokens.get(u.movieId);
+  if (!seqs) {
+    seqs = new Map();
+    filmTokens.set(u.movieId, seqs);
+    filmCount += 1;
+  }
+  const tokens = tokenize(u.text);
+  seqs.set(u.seq, tokens);
+  for (const token of new Set(tokens)) {
+    if (seenIn.get(token) !== u.movieId) {
+      seenIn.set(token, u.movieId);
+      df.set(token, (df.get(token) ?? 0) + 1);
+    }
+  }
+}
+
+const utterancesByFilm = new Map<number, Utterance[]>();
+for await (const u of readJsonl<Utterance>(resolve(DATA_DIR, 'utterances.jsonl'))) {
+  if (sliceOnly && !sliceIds.has(u.movieId)) continue;
+  let list = utterancesByFilm.get(u.movieId);
+  if (!list) {
+    list = [];
+    utterancesByFilm.set(u.movieId, list);
+  }
+  list.push(u);
+}
+
+function idf(token: string): number {
+  return Math.log(filmCount / (1 + (df.get(token) ?? 0)));
+}
+
+function distinctiveness(u: Utterance, tokens: string[]): number {
+  if (u.text.length < MIN_CHARS || u.text.length > MAX_CHARS) return -1;
+  if (tokens.length < 4) return -1;
+  const score = tokens.reduce((sum, token) => sum + idf(token), 0);
+  return score / Math.sqrt(tokens.length);
+}
+
+const fiveLines: Record<string, number[]> = {};
+for (const [movieId, utterances] of utterancesByFilm) {
+  const tokensBySeq = filmTokens.get(movieId)!;
+  const picks: number[] = [];
+  for (let q = 0; q < QUINTILES; q++) {
+    let best: Utterance | null = null;
+    let bestScore = -1;
+    for (const u of utterances) {
+      const quintile = Math.min(Math.floor(u.arc * QUINTILES), QUINTILES - 1);
+      if (quintile !== q) continue;
+      const score = distinctiveness(u, tokensBySeq.get(u.seq) ?? []);
+      if (score > bestScore) {
+        bestScore = score;
+        best = u;
+      }
+    }
+    if (best) picks.push(best.seq);
+  }
+  if (picks.length > 0) fiveLines[movieId] = picks;
+}
+
+await writeJson(resolve(DATA_DIR, 'five-lines.json'), fiveLines);
+log.info(`five lines: ${Object.keys(fiveLines).length} films${sliceOnly ? ' (slice)' : ''}`);

@@ -66,7 +66,16 @@ def main() -> None:
 
     done = 0
     if progress_path.exists() and args.output.exists():
-        done = json.loads(progress_path.read_text())["rows"]
+        progress = json.loads(progress_path.read_text())
+        if progress.get("model") != args.model or progress.get("dim") != dim:
+            print(
+                f"progress file belongs to {progress.get('model')} (dim {progress.get('dim')}); "
+                f"requested {args.model} (dim {dim}). Delete the output, meta, and progress "
+                "files to start fresh.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        done = progress["rows"]
         expected = done * dim * 4
         actual = args.output.stat().st_size
         if actual < expected:
@@ -97,11 +106,11 @@ def main() -> None:
             batch_index += 1
             if batch_index % args.checkpoint_every == 0:
                 out.flush()
-                progress_path.write_text(json.dumps({"rows": written}))
+                progress_path.write_text(json.dumps({"rows": written, "model": args.model, "dim": dim}))
                 rate = (written - done) / (time.time() - started)
                 print(f"{written}/{total} ({rate:.0f}/s)", flush=True)
 
-    progress_path.write_text(json.dumps({"rows": written}))
+    progress_path.write_text(json.dumps({"rows": written, "model": args.model, "dim": dim}))
     meta_path.write_text(json.dumps({"model": args.model, "dim": dim, "count": written}))
     rate = (written - done) / max(time.time() - started, 1e-9)
     print(f"done: {written} rows at {rate:.0f}/s on {device}")

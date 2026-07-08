@@ -13,12 +13,20 @@
     "utterances": "tsx src/stages/utterances.ts",
     "embed": "uv sync -q --project python && uv run --project python python/embed.py --input data/utterances.jsonl --output data/embeddings.bin",
     "embed:cpu": "tsx src/stages/embed.ts",
-    "load": "tsx src/stages/load.ts"
+    "load": "tsx src/stages/load.ts",
+    "beats": "tsx src/stages/beats.ts",
+    "embed-beats": "uv sync -q --project python && uv run --project python python/embed.py --input data/beats.jsonl --output data/beat-embeddings.bin --model BAAI/bge-base-en-v1.5",
+    "segments": "tsx src/stages/segments.ts",
+    "pairs": "uv sync -q --project python && uv run --project python python/pairs.py --data data",
+    "map": "tsx src/stages/movie-map.ts",
+    "five-lines": "tsx src/stages/five-lines.ts",
+    "load-ladder": "tsx src/stages/load-ladder.ts"
   },
   "dependencies": {
     "@clickhouse/client": "^1.23.1",
     "@huggingface/transformers": "^4.2.0",
-    "@unquote/shared": "workspace:*"
+    "@unquote/shared": "workspace:*",
+    "umap-js": "^1.4.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
