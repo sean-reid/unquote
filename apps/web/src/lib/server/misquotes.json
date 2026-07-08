@@ -394,5 +394,20 @@
     "year": 1983,
     "note": "Often credited to Dirty Harry; it is from the fourth film, Sudden Impact.",
     "kind": "signature"
+  },
+  {
+    "popular": "You talking to me?",
+    "actual": "You talkin' to me?",
+    "film": "Taxi Driver",
+    "year": 1976,
+    "kind": "misquote"
+  },
+  {
+    "popular": "You talkin' to me?",
+    "actual": "You talkin' to me?",
+    "film": "Taxi Driver",
+    "year": 1976,
+    "note": "Improvised at the mirror, then borrowed by every tough guy since.",
+    "kind": "signature"
   }
 ]

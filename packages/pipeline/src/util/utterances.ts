@@ -161,6 +161,27 @@ export function cleanCueText(raw: string): string {
 }
 
 /**
+ * Subtitle-OCR sources misread capital I as lowercase l ("lf you build it",
+ * "lt's alive") and detach punctuation ("he will come ."). The rewrites are
+ * unambiguous, but they only run in films that show the OCR signature, so a
+ * clean transcript is never touched. The l fix needs a following consonant,
+ * boundary, or apostrophe: "look", "llama", and "lbs" stay as written.
+ */
+const OCR_SIGNATURE = /\b(?:lf|lt|ln|l'm|l've|l'll|l'd)\b/;
+
+export function fixOcrArtifacts(cues: string[]): string[] {
+  let hits = 0;
+  for (const cue of cues) {
+    if (OCR_SIGNATURE.test(cue)) hits += 1;
+    if (hits >= 3) break;
+  }
+  if (hits < 3) return cues;
+  return cues.map((cue) =>
+    cue.replace(/\bl(?=[cdfgjkmnpqstvwxz]|\b|')/g, 'I').replace(/ +(?=[.,!?;:])/g, ''),
+  );
+}
+
+/**
  * Bracketed directions can straddle cue boundaries ("[TIRES SCREECHING" then
  * "THEN CAR HORN HONKING]"). Track the open bracket across cues and drop
  * everything until its closer; single-cue brackets are untouched here and die
@@ -340,14 +361,15 @@ export function buildUtterances(cues: string[], options: BuildOptions = {}): Bui
     texts.push(text);
   };
 
-  const marked = lyricRunMask(cues, options.musical ?? false);
-  const unmarked = unmarkedLyricMask(cues);
+  const fixed = fixOcrArtifacts(cues);
+  const marked = lyricRunMask(fixed, options.musical ?? false);
+  const unmarked = unmarkedLyricMask(fixed);
   const lyric = marked.map((m, i) => m || unmarked[i]!);
   // Masks see the original cues (their music markers live in brackets); the
   // text pipeline sees cues with cross-cue direction spans removed.
-  const stripped = stripCrossCueDirections(cues);
+  const stripped = stripCrossCueDirections(fixed);
 
-  cues.forEach((_raw, index) => {
+  fixed.forEach((_raw, index) => {
     if (lyric[index]) {
       dropped.lyrics += 1;
       return;

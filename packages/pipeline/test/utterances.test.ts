@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildUtterances,
   cleanCueText,
+  fixOcrArtifacts,
   isMusicCue,
   lyricRunMask,
   splitLongText,
@@ -418,5 +419,28 @@ describe('group speaker labels', () => {
       'They raised their glasses. Aye, Captain!',
     );
     expect(cleanCueText('BOTH: We do.')).toBe('We do.');
+  });
+});
+
+describe('fixOcrArtifacts', () => {
+  const ocr = [
+    "lf you build it, he will come .",
+    "All right. lf you build it, he will come .",
+    "l'm telling you, lt's real. ln the corn.",
+    'N ice try. Look, a llama weighs 300 lbs.',
+  ];
+
+  it('fixes l-for-I misreads and reattaches punctuation in flagged films', () => {
+    expect(fixOcrArtifacts(ocr)).toEqual([
+      'If you build it, he will come.',
+      'All right. If you build it, he will come.',
+      "I'm telling you, It's real. In the corn.",
+      'N ice try. Look, a llama weighs 300 lbs.',
+    ]);
+  });
+
+  it('leaves films without the OCR signature alone', () => {
+    const clean = ['lf you say so.', 'Nothing else here.', 'Or here.'];
+    expect(fixOcrArtifacts(clean)).toBe(clean);
   });
 });
