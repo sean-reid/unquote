@@ -206,7 +206,13 @@
           {/each}
         </ol>
       {:else}
-        <p class="empty">Nothing close enough. Try fewer words, or describe the scene instead.</p>
+        <p class="empty">
+          {#if !data.filmCount}
+            The library is still loading in. Give it a few minutes and try again.
+          {:else}
+            Nothing close enough. Try fewer words, or describe the scene instead.
+          {/if}
+        </p>
       {/if}
     </section>
   {/if}

@@ -306,6 +306,17 @@ function findCliff(scores: number[]): number {
 }
 
 export async function search(query: string): Promise<SearchResponse> {
+  try {
+    return await searchInner(query);
+  } catch (error) {
+    // A database mid-load or mid-swap answers with empty results, not a 500;
+    // the page pairs this with the library-loading notice when films read 0.
+    console.error('search degraded:', error instanceof Error ? error.message : error);
+    return { query, hits: [], strongCount: 0, movie: null, misquote: null, phrase: null };
+  }
+}
+
+async function searchInner(query: string): Promise<SearchResponse> {
   const queryNorm = normalize(query);
   const tokens = tokenize(query);
   if (queryNorm.length === 0) {
