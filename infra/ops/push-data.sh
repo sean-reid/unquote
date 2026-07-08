@@ -44,6 +44,7 @@ LINES_COLUMNS='
   movie_id UInt32, seq UInt32, arc Float32, text String, text_norm String,
   vec Array(Float32),
   INDEX idx_text_norm text_norm TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4'
+VEC_INDEX="INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', 384, 'bf16', 16, 128) GRANULARITY 100000000"
 
 chq "CREATE TABLE IF NOT EXISTS movies ($MOVIES_COLUMNS) ENGINE = MergeTree ORDER BY id"
 chq "CREATE TABLE IF NOT EXISTS lines ($LINES_COLUMNS) ENGINE = MergeTree ORDER BY (movie_id, seq)"
@@ -66,6 +67,10 @@ if [ "$MOVIES" -eq 0 ] || [ "$LINES" -eq 0 ]; then
   echo "staging looks empty; aborting before the swap" >&2
   exit 1
 fi
+
+echo "building the vector index (the long step)..."
+chq "ALTER TABLE lines_staging ADD INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', 384, 'bf16', 16, 128) GRANULARITY 100000000 SETTINGS allow_experimental_vector_similarity_index = 1"
+chq "ALTER TABLE lines_staging MATERIALIZE INDEX vec_idx SETTINGS allow_experimental_vector_similarity_index = 1, mutations_sync = 2"
 
 chq 'EXCHANGE TABLES movies_staging AND movies'
 chq 'EXCHANGE TABLES lines_staging AND lines'
