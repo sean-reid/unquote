@@ -105,7 +105,7 @@ async function createTables(ch: ClickHouseClient): Promise<void> {
     query: `CREATE TABLE IF NOT EXISTS movies (${MOVIES_COLUMNS}) ENGINE = MergeTree ORDER BY id`,
   });
   await ch.command({
-    query: `CREATE TABLE IF NOT EXISTS lines (${LINES_COLUMNS}) ENGINE = MergeTree ORDER BY (movie_id, seq)`,
+    query: `CREATE TABLE IF NOT EXISTS lines (${LINES_COLUMNS}) ENGINE = MergeTree ORDER BY (movie_id, seq) SETTINGS index_granularity = 512`,
     clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
   });
   await ch.command({ query: 'DROP TABLE IF EXISTS movies_staging' });
@@ -116,7 +116,7 @@ async function createTables(ch: ClickHouseClient): Promise<void> {
   await ch.command({
     // Staging skips the vector index so inserts stay fast; it is added and
     // materialized once, after all rows land, right before the swap.
-    query: `CREATE TABLE lines_staging (${LINES_COLUMNS_NO_VEC_IDX}) ENGINE = MergeTree ORDER BY (movie_id, seq)`,
+    query: `CREATE TABLE lines_staging (${LINES_COLUMNS_NO_VEC_IDX}) ENGINE = MergeTree ORDER BY (movie_id, seq) SETTINGS index_granularity = 512`,
     clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
   });
 }

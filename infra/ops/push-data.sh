@@ -47,11 +47,11 @@ LINES_COLUMNS='
 VEC_INDEX="INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', 384, 'bf16', 16, 128) GRANULARITY 100000000"
 
 chq "CREATE TABLE IF NOT EXISTS movies ($MOVIES_COLUMNS) ENGINE = MergeTree ORDER BY id"
-chq "CREATE TABLE IF NOT EXISTS lines ($LINES_COLUMNS) ENGINE = MergeTree ORDER BY (movie_id, seq)"
+chq "CREATE TABLE IF NOT EXISTS lines ($LINES_COLUMNS) ENGINE = MergeTree ORDER BY (movie_id, seq) SETTINGS index_granularity = 512"
 chq "DROP TABLE IF EXISTS movies_staging"
 chq "DROP TABLE IF EXISTS lines_staging"
 chq "CREATE TABLE movies_staging ($MOVIES_COLUMNS) ENGINE = MergeTree ORDER BY id"
-chq "CREATE TABLE lines_staging ($LINES_COLUMNS) ENGINE = MergeTree ORDER BY (movie_id, seq)"
+chq "CREATE TABLE lines_staging ($LINES_COLUMNS) ENGINE = MergeTree ORDER BY (movie_id, seq) SETTINGS index_granularity = 512"
 
 zstdcat /tmp/unquote-push/movies.native.zst | docker compose -f docker-compose.prod.yml exec -T clickhouse \
   clickhouse-client --user loader --password "$LOADER_PASSWORD" --database unquote \
