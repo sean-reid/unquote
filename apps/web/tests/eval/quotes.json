@@ -145,7 +145,8 @@
     "expectFilm": "inception",
     "expectInTop": 5,
     "mustBeInCorpus": true,
-    "note": "meme phrasing of we have to go deeper"
+    "note": "meme phrasing of we have to go deeper",
+    "knownGap": "full corpus adds literally-deeper films (The Abyss) that outrank the meme intent; rank 7; moment-level fame nudge is the audit candidate"
   },
   {
     "query": "do not go gentle into that good night",
@@ -315,8 +316,7 @@
     "expectFilm": "field of dreams",
     "expectInTop": 3,
     "mustBeInCorpus": false,
-    "note": "verbatim, full corpus film",
-    "knownGap": "field of dreams transcript lacks the whispered voice-over line; transcript upgrade candidate"
+    "note": "verbatim, full corpus film"
   },
   {
     "query": "greed for lack of a better word is good",
