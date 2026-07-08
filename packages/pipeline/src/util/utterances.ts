@@ -138,6 +138,12 @@ export function cleanCueText(raw: string): string {
       .replace(SPEAKER_LABEL, '')
       // A cue that is nothing but a speaker label ('WOMAN:') names, says nothing.
       .replace(/^[A-Z][A-Za-z'.]*(?:\s+[A-Z][A-Za-z'.]*){0,2}:$/, '')
+      // Group labels survive mid-text after merges ("ALL: Aye!"); the leading
+      // form is caught by SPEAKER_LABEL, this catches the rest.
+      .replace(/(^|\s)(?:ALL|BOTH|CROWD|EVERYONE|TOGETHER)\s*:\s+/g, '$1')
+      // Quote marks around a single word fragment the embedding (Say "what"
+      // again); the word carries the meaning, the marks carry nothing.
+      .replace(/["\u201c\u201d]([A-Za-z']+)["\u201c\u201d]/g, '$1')
       .replace(/([a-z])"([a-z])/g, "$1'$2") // it"s -> it's
       // Subtitle OCR confuses "l" and "I": mid-word capital I is really l
       // (wouIdn't, feII, kiIIed), and a leading lowercase l is really I (l'm).
@@ -147,9 +153,46 @@ export function cleanCueText(raw: string): string {
       .replace(/\bl'(m|ll|ve|d|re|s)\b/g, "I'$1")
       .replace(/\bl\b/g, 'I')
       .replace(/(\w)\s+'(t|s|re|ll|ve|d|m)\b/gi, "$1'$2") // weren 't -> weren't
+      // An opening quote whose closer never arrives is a cue-break artifact.
+      .replace(/^\s*["\u201c](?=[^"\u201c\u201d]*$)/, '')
       .replace(/\s+/g, ' ')
       .trim()
   );
+}
+
+/**
+ * Bracketed directions can straddle cue boundaries ("[TIRES SCREECHING" then
+ * "THEN CAR HORN HONKING]"). Track the open bracket across cues and drop
+ * everything until its closer; single-cue brackets are untouched here and die
+ * later in cleanCueText.
+ */
+export function stripCrossCueDirections(cues: string[]): string[] {
+  let openBracket = false;
+  return cues.map((cue) => {
+    let out = '';
+    let i = 0;
+    while (i < cue.length) {
+      const ch = cue[i]!;
+      if (openBracket) {
+        if (ch === ']') openBracket = false;
+        i += 1;
+        continue;
+      }
+      if (ch === '[') {
+        const close = cue.indexOf(']', i);
+        if (close === -1) {
+          openBracket = true;
+          i = cue.length;
+          continue;
+        }
+        i = close + 1;
+        continue;
+      }
+      out += ch;
+      i += 1;
+    }
+    return out.replace(/\s+/g, ' ').trim();
+  });
 }
 
 export interface Turn {
@@ -221,12 +264,59 @@ export function splitLongText(text: string, cap = MAX_UTTERANCE_CHARS): string[]
 
 export interface BuildResult {
   texts: string[];
-  dropped: { lyrics: number; empty: number; short: number };
+  dropped: { lyrics: number; empty: number; short: number; credits: number };
 }
 
 export interface BuildOptions {
   /** TMDb Music genre; widens lyric-run detection. */
   musical?: boolean;
+  /** Film title, for recognizing its own title card fused into a cue. */
+  title?: string;
+}
+
+const lettersOnly = (text: string): string => text.replace(/[^a-z]/gi, '').toLowerCase();
+
+/**
+ * On-screen title cards fuse into dialogue cues ("PROMETHEUS Get Charlie.").
+ * Strip a leading unpunctuated ALL-CAPS run when it matches the film's own
+ * title (OCR-tolerant) or sits in the opening 3% before sentence-case text.
+ * Punctuated shouting ("STOP! Get down!") keeps its caps.
+ */
+export function stripTitleCardPrefix(
+  text: string,
+  title: string | undefined,
+  frac: number,
+): string {
+  const match = text.match(/^([A-Z][A-Z0-9 :&'-]{2,}?)\s+(?=[A-Z][a-z]|I\b)/);
+  if (!match) return text;
+  const run = match[1]!;
+  if (/[.?!]$/.test(run.trim())) return text;
+  const runLetters = lettersOnly(run);
+  if (runLetters.length < 3) return text;
+  const titleLetters = title ? lettersOnly(title) : '';
+  const titleMatch =
+    titleLetters.length >= 3 &&
+    (runLetters === titleLetters ||
+      (Math.abs(runLetters.length - titleLetters.length) <= 2 &&
+        (titleLetters.startsWith(runLetters.slice(0, -1)) ||
+          runLetters.startsWith(titleLetters.slice(0, -1)))));
+  if (titleMatch || frac < 0.03) return text.slice(match[0].length);
+  return text;
+}
+
+// Dedications and production credits read as dialogue to every other filter.
+const CREDIT_TEXT =
+  /\b(dedicated to|in (loving )?memory of|subtitles? (by|downloaded)|directed by|produced by|screenplay by|based (up)?on the (novel|book|play|story))\b/i;
+
+function isCreditUtterance(text: string, index: number, total: number): boolean {
+  if (CREDIT_TEXT.test(text)) return true;
+  const margin = Math.max(1, Math.floor(total * 0.02));
+  if (index < margin || index >= total - margin) {
+    const letters = text.replace(/[^a-zA-Z]/g, '');
+    const upper = letters.replace(/[^A-Z]/g, '');
+    if (letters.length >= 8 && upper.length / letters.length > 0.5) return true;
+  }
+  return false;
 }
 
 // Questions and exclamations are hard stops: dialogue never continues a
@@ -235,7 +325,7 @@ const HARD_STOP = /[?!]["'”’]?$/;
 
 /** Rebuild utterances from one film's ordered cues. */
 export function buildUtterances(cues: string[], options: BuildOptions = {}): BuildResult {
-  const dropped = { lyrics: 0, empty: 0, short: 0 };
+  const dropped = { lyrics: 0, empty: 0, short: 0, credits: 0 };
   const texts: string[] = [];
   let buffer = '';
 
@@ -253,13 +343,21 @@ export function buildUtterances(cues: string[], options: BuildOptions = {}): Bui
   const marked = lyricRunMask(cues, options.musical ?? false);
   const unmarked = unmarkedLyricMask(cues);
   const lyric = marked.map((m, i) => m || unmarked[i]!);
+  // Masks see the original cues (their music markers live in brackets); the
+  // text pipeline sees cues with cross-cue direction spans removed.
+  const stripped = stripCrossCueDirections(cues);
 
-  cues.forEach((raw, index) => {
+  cues.forEach((_raw, index) => {
     if (lyric[index]) {
       dropped.lyrics += 1;
       return;
     }
-    const cleaned = cleanCueText(raw);
+    const prefixless = stripTitleCardPrefix(
+      stripped[index]!,
+      options.title,
+      cues.length > 0 ? index / cues.length : 0,
+    );
+    const cleaned = cleanCueText(prefixless);
     if (cleaned.length === 0) {
       dropped.empty += 1;
       return;
@@ -283,9 +381,17 @@ export function buildUtterances(cues: string[], options: BuildOptions = {}): Bui
       // lowercase, and the buffer does not end on a hard stop. An uppercase
       // start after a dangling fragment is far more often a speaker change
       // than a sentence continuing into a proper noun.
-      const continues = !turn.newSpeaker && /^[a-z]/.test(turn.text) && !HARD_STOP.test(buffer);
+      // An ellipsis handing off to an ellipsis is one thought split for
+      // timing ("Get busy living... / ...or get busy dying.").
+      const ellipsisHandoff =
+        !turn.newSpeaker && /(\.\.\.|\u2026)$/.test(buffer) && /^(\.\.\.|\u2026)/.test(turn.text);
+      const continues =
+        (!turn.newSpeaker && /^[a-z]/.test(turn.text) && !HARD_STOP.test(buffer)) ||
+        ellipsisHandoff;
       if (continues && buffer.length + turn.text.length + 1 <= MAX_UTTERANCE_CHARS) {
-        buffer = `${buffer} ${turn.text}`;
+        buffer = ellipsisHandoff
+          ? `${buffer} ${turn.text.replace(/^(\.\.\.|\u2026)\s*/, '')}`
+          : `${buffer} ${turn.text}`;
       } else {
         flush();
         buffer = turn.text;
@@ -294,5 +400,13 @@ export function buildUtterances(cues: string[], options: BuildOptions = {}): Bui
   });
   flush();
 
-  return { texts, dropped };
+  const kept = texts.filter((text, index) => {
+    if (isCreditUtterance(text, index, texts.length)) {
+      dropped.credits += 1;
+      return false;
+    }
+    return true;
+  });
+
+  return { texts: kept, dropped };
 }

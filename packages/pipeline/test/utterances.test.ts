@@ -6,6 +6,8 @@ import {
   lyricRunMask,
   splitLongText,
   splitTurns,
+  stripCrossCueDirections,
+  stripTitleCardPrefix,
   unmarkedLyricMask,
 } from '../src/util/utterances.js';
 import { downrankSet, scoreFilm } from '../src/util/quality.js';
@@ -320,5 +322,101 @@ describe('label-only cues', () => {
     const { texts, dropped } = buildUtterances(['WOMAN:', 'I know, I did.']);
     expect(texts).toEqual(['I know, I did.']);
     expect(dropped.empty).toBe(1);
+  });
+});
+
+describe('credit and dedication stripping', () => {
+  it('drops the Scarface dedication card', () => {
+    const { texts, dropped } = buildUtterances([
+      'This film is dedicated to HOWARD HAWKS and BEN HECH',
+      'Say hello to my little friend!',
+    ]);
+    expect(texts).toEqual(['Say hello to my little friend!']);
+    expect(dropped.credits).toBe(1);
+  });
+
+  it('drops a mostly-uppercase card in the arc margins but not mid-film shouting', () => {
+    const middle = Array.from({ length: 60 }, (_, i) => `This is spoken line number ${i}.`);
+    const { texts } = buildUtterances(['A FILM BY SOMEBODY IMPORTANT', ...middle, 'NO! GET DOWN!']);
+    expect(texts).not.toContain('A FILM BY SOMEBODY IMPORTANT');
+    expect(texts.some((t) => t.includes('spoken line number 30'))).toBe(true);
+  });
+});
+
+describe('stripTitleCardPrefix', () => {
+  it('strips the film title fused onto Prometheus dialogue', () => {
+    expect(
+      stripTitleCardPrefix('PROMETHEUS Get Charlie. Doctor Holloway!', 'Prometheus', 0.4),
+    ).toBe('Get Charlie. Doctor Holloway!');
+  });
+
+  it('strips an early unmatched title card before sentence-case text', () => {
+    expect(stripTitleCardPrefix('THE LAST VOYAGE Where were you?', 'Something Else', 0.01)).toBe(
+      'Where were you?',
+    );
+  });
+
+  it('spares punctuated shouting and late caps runs', () => {
+    expect(stripTitleCardPrefix('STOP! Get down!', 'Prometheus', 0.01)).toBe('STOP! Get down!');
+    expect(stripTitleCardPrefix('RUN FOR IT Move now.', 'Prometheus', 0.5)).toBe(
+      'RUN FOR IT Move now.',
+    );
+  });
+
+  it('flows through buildUtterances via the title option', () => {
+    const { texts } = buildUtterances(
+      ['Down in the dark.', 'PROMETHEUS Get Charlie. Doctor Holloway!', 'On my way.'],
+      { title: 'Prometheus' },
+    );
+    expect(texts).toContain('Get Charlie. Doctor Holloway!');
+  });
+});
+
+describe('orphan quote marks', () => {
+  it('strips a leading unbalanced quote at cue start', () => {
+    expect(cleanCueText('"Say what again!')).toBe('Say what again!');
+    expect(cleanCueText('"may assuage his conscience')).toBe('may assuage his conscience');
+  });
+
+  it('unwraps quote marks around a single word but keeps real quotations', () => {
+    expect(cleanCueText('Say "what" again')).toBe('Say what again');
+    expect(cleanCueText('He said "make it so." Remember?')).toBe('He said "make it so." Remember?');
+  });
+});
+
+describe('stripCrossCueDirections', () => {
+  it('drops a bracketed direction spanning two cues', () => {
+    const { texts, dropped } = buildUtterances([
+      '[TIRES SCREECHING',
+      'THEN CAR HORN HONKING]',
+      'Who is it?',
+    ]);
+    expect(texts).toEqual(['Who is it?']);
+    expect(dropped.empty).toBe(2);
+  });
+
+  it('keeps dialogue around a single-cue bracket', () => {
+    expect(stripCrossCueDirections(['[DOOR SLAMS] Who is it?'])).toEqual(['Who is it?']);
+  });
+});
+
+describe('ellipsis continuations', () => {
+  it('merges the Shawshank ellipsis handoff into one utterance', () => {
+    const { texts } = buildUtterances(['Get busy living...', '...or get busy dying.']);
+    expect(texts).toEqual(['Get busy living... or get busy dying.']);
+  });
+
+  it('does not merge a sentence-case follow-on without its own ellipsis', () => {
+    const { texts } = buildUtterances(['Get busy living...', 'Or get busy dying.']);
+    expect(texts).toEqual(['Get busy living...', 'Or get busy dying.']);
+  });
+});
+
+describe('group speaker labels', () => {
+  it('strips an uppercase group label surviving mid-text', () => {
+    expect(cleanCueText('They raised their glasses. ALL: Aye, Captain!')).toBe(
+      'They raised their glasses. Aye, Captain!',
+    );
+    expect(cleanCueText('BOTH: We do.')).toBe('We do.');
   });
 });

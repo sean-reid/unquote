@@ -15,36 +15,66 @@ const musicals = new Set(
 );
 const titles = new Map(movies.map((m) => [m.id, m.title]));
 
-// Group cues per film. Springfield extractions come first; screenplay rescues
-// (cues-rescue.jsonl, same shape) fill films with no transcript.
+// Group cues per film in layers: Springfield extractions, then rescue fills
+// (cues-rescue.jsonl, same shape), then upgrades (cues-upgrade.jsonl). A later
+// layer replaces a film's cues wholesale, so an upgraded transcript wins.
 const filmCues = new Map<number, string[]>();
+const filmSource = new Map<number, string>();
 async function readCueFile(name: string): Promise<void> {
   const path = resolve(DATA_DIR, name);
   if (!existsSync(path)) return;
+  const layer = new Map<number, string[]>();
   for await (const cue of readJsonl<Cue>(path)) {
-    let list = filmCues.get(cue.movieId);
+    let list = layer.get(cue.movieId);
     if (!list) {
       list = [];
-      filmCues.set(cue.movieId, list);
+      layer.set(cue.movieId, list);
     }
     list.push(cue.text);
+  }
+  for (const [movieId, list] of layer) {
+    filmCues.set(movieId, list);
+    filmSource.set(movieId, name);
   }
 }
 await readCueFile('cues.jsonl');
 await readCueFile('cues-rescue.jsonl');
+await readCueFile('cues-upgrade.jsonl');
+
+// A film's text is a draft screenplay only when it still rides on the IMSDb
+// rescue (rescue-report.json lists those); everything else is a transcript of
+// the shot film. The flag feeds movie_quality so downstream consumers know
+// which films' wording may diverge from the screen.
+const imsdbDraftIds = new Set<number>();
+{
+  const reportPath = resolve(DATA_DIR, 'rescue-report.json');
+  if (existsSync(reportPath)) {
+    const report = await readJson<{ films: Array<{ movieId: number }> }>(reportPath);
+    for (const film of report.films) imsdbDraftIds.add(film.movieId);
+  }
+}
+function sourceKind(movieId: number): 'transcript' | 'draft' {
+  const source = filmSource.get(movieId);
+  if (source === 'cues-rescue.jsonl' && imsdbDraftIds.has(movieId)) return 'draft';
+  return 'transcript';
+}
 
 const utterances: Utterance[] = [];
-const dropped = { lyrics: 0, empty: 0, short: 0 };
+const dropped = { lyrics: 0, empty: 0, short: 0, credits: 0 };
 const lengths: number[] = [];
 const qualities: FilmQuality[] = [];
 
 for (const movieId of [...filmCues.keys()].sort((a, b) => a - b)) {
   const cues = filmCues.get(movieId)!;
   qualities.push(scoreFilm(movieId, cues));
-  const result = buildUtterances(cues, { musical: musicals.has(movieId) });
+  const result = buildUtterances(cues, {
+    musical: musicals.has(movieId),
+    title: titles.get(movieId),
+  });
   dropped.lyrics += result.dropped.lyrics;
   dropped.empty += result.dropped.empty;
   dropped.short += result.dropped.short;
+  dropped.credits += result.dropped.credits;
   const n = result.texts.length;
   result.texts.forEach((text, seq) => {
     utterances.push({ movieId, seq, arc: n > 1 ? seq / (n - 1) : 0, text });
@@ -58,7 +88,10 @@ const downranked = downrankSet(qualities);
 await writeJson(
   resolve(DATA_DIR, 'quality.json'),
   Object.fromEntries(
-    qualities.map((q) => [q.movieId, { ...q, downrank: downranked.has(q.movieId) }]),
+    qualities.map((q) => [
+      q.movieId,
+      { ...q, downrank: downranked.has(q.movieId), sourceKind: sourceKind(q.movieId) },
+    ]),
   ),
 );
 
@@ -102,7 +135,10 @@ log.info(
   `utterances: ${report.utterances} across ${report.films} films ` +
     `(mean ${report.meanPerFilm}/film, p50 length ${report.lengthPercentiles.p50})`,
 );
-log.info(`dropped: ${dropped.lyrics} lyrics, ${dropped.empty} empty, ${dropped.short} short`);
+log.info(
+  `dropped: ${dropped.lyrics} lyrics, ${dropped.empty} empty, ` +
+    `${dropped.short} short, ${dropped.credits} credits`,
+);
 log.info(
   `quality: p50 ${report.quality.scorePercentiles.p50}, ` +
     `${downranked.size} films flagged for downrank`,
