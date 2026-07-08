@@ -35,6 +35,7 @@ interface SegmentRecord {
 
 function client(database?: string): ClickHouseClient {
   return createClient({
+    request_timeout: 900_000,
     url: process.env.CLICKHOUSE_URL ?? 'http://localhost:8123',
     username: process.env.CLICKHOUSE_USER ?? 'default',
     password: process.env.CLICKHOUSE_PASSWORD ?? 'unquote-local',
@@ -52,7 +53,7 @@ function vectorIndex(dim: number): string {
 
 async function createTables(ch: ClickHouseClient, dim: number): Promise<void> {
   const tables: Record<string, string> = {
-    beats: `(movie_id UInt32, idx UInt32, start_seq UInt32, end_seq UInt32, arc Float32, text String, vec Array(Float32), ${vectorIndex(dim)}) ENGINE = MergeTree ORDER BY (movie_id, idx)`,
+    beats: `(movie_id UInt32, idx UInt32, start_seq UInt32, end_seq UInt32, arc Float32, text String, vec Array(Float32), generic Float32, ${vectorIndex(dim)}) ENGINE = MergeTree ORDER BY (movie_id, idx)`,
     segments: `(movie_id UInt32, idx UInt32, start_beat UInt32, end_beat UInt32, start_seq UInt32, end_seq UInt32, arc Float32, vec Array(Float32), ${vectorIndex(dim)}) ENGINE = MergeTree ORDER BY (movie_id, idx)`,
     movie_pairs: `(movie_id UInt32, rank UInt8, similar_id UInt32, score Float32) ENGINE = MergeTree ORDER BY (movie_id, rank)`,
     movie_map: `(movie_id UInt32, x Float32, y Float32) ENGINE = MergeTree ORDER BY movie_id`,
@@ -64,10 +65,13 @@ async function createTables(ch: ClickHouseClient, dim: number): Promise<void> {
       clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
     });
     await ch.command({ query: `DROP TABLE IF EXISTS ${name}_staging` });
-    await ch.command({
-      query: `CREATE TABLE ${name}_staging ${schema}`,
-      clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
-    });
+    // Staging skips the vector index so bulk inserts stay fast and lean; the
+    // index is added and materialized sequentially afterwards, one table at a
+    // time, memory-capped, because the whole Docker VM has under 8GB.
+    const stagingSchema = schema
+      .replace(`${vectorIndex(dim)}, `, '')
+      .replace(`, ${vectorIndex(dim)}`, '');
+    await ch.command({ query: `CREATE TABLE ${name}_staging ${stagingSchema}` });
   }
 }
 
@@ -77,7 +81,7 @@ async function loadVectorRows<T>(
   jsonl: string,
   bin: string,
   dim: number,
-  toRow: (record: T, vec: number[]) => Record<string, unknown>,
+  toRow: (record: T, vec: number[], row: number) => Record<string, unknown>,
 ): Promise<number> {
   const rowBytes = dim * 4;
   const file = await open(path.join(DATA_DIR, bin), 'r');
@@ -92,7 +96,7 @@ async function loadVectorRows<T>(
   for await (const record of readJsonl<T>(path.join(DATA_DIR, jsonl))) {
     await file.read(buffer, 0, rowBytes, row * rowBytes);
     const vec = Array.from(new Float32Array(buffer.buffer, buffer.byteOffset, dim));
-    batch.push(toRow(record, vec));
+    batch.push(toRow(record, vec, row));
     row += 1;
     if (batch.length >= INSERT_BATCH) await flush();
   }
@@ -117,13 +121,22 @@ async function main(): Promise<void> {
   const ch = client(DATABASE);
   await createTables(ch, dim);
 
+  // Genericness rides along with the beat rows; the bridge and neighbor
+  // surfaces penalize universal-filler moments with it.
+  const genericBytes = await readFile(path.join(DATA_DIR, 'beat-generic.bin'));
+  const generic = new Float32Array(
+    genericBytes.buffer,
+    genericBytes.byteOffset,
+    genericBytes.byteLength / 4,
+  );
+
   const beatCount = await loadVectorRows<BeatRecord>(
     ch,
     'beats_staging',
     'beats.jsonl',
     'beat-embeddings.bin',
     dim,
-    (b, vec) => ({
+    (b, vec, row) => ({
       movie_id: b.movieId,
       idx: b.idx,
       start_seq: b.startSeq,
@@ -131,8 +144,12 @@ async function main(): Promise<void> {
       arc: b.arc,
       text: b.text,
       vec,
+      generic: generic[row] ?? 0,
     }),
   );
+  if (generic.length !== beatCount) {
+    throw new Error(`beat-generic.bin has ${generic.length} rows, beats.jsonl has ${beatCount}`);
+  }
   if (beatCount !== beatMeta.count) {
     throw new Error(`beats.jsonl has ${beatCount} rows, meta says ${beatMeta.count}`);
   }
@@ -192,6 +209,24 @@ async function main(): Promise<void> {
     })),
     format: 'JSONEachRow',
   });
+
+  // Vector indexes build one table at a time with a hard memory cap; the
+  // container shares a small VM and parallel HNSW builds have taken it down.
+  for (const name of ['beats', 'segments']) {
+    await ch.command({
+      query: `ALTER TABLE ${name}_staging ADD INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', ${dim}, 'bf16', 16, 128) GRANULARITY 100000000`,
+      clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
+    });
+    console.log(`materializing ${name} vector index...`);
+    await ch.command({
+      query: `ALTER TABLE ${name}_staging MATERIALIZE INDEX vec_idx`,
+      clickhouse_settings: {
+        allow_experimental_vector_similarity_index: 1,
+        mutations_sync: '2',
+        max_memory_usage: '3500000000',
+      },
+    });
+  }
 
   for (const name of ['beats', 'segments', 'movie_pairs', 'movie_map', 'five_lines']) {
     await ch.command({ query: `EXCHANGE TABLES ${name}_staging AND ${name}` });
