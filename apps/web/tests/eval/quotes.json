@@ -40,7 +40,7 @@
     "expectInTop": 3,
     "mustBeInCorpus": true,
     "note": "compressed",
-    "knownGap": "transcript renders it as Say \"what\" again with quote marks fragmenting the embedding; strip-quoted-single-words rule queued in the cleanup batch"
+    "knownGap": "the line is intact after the cleanup (Say what again! I dare ya!) but the transcript says dare ya where searchers type dare you, so no arm matches exactly; semantic ranks it just off the podium"
   },
   {
     "query": "life is like a box of chocolates",
@@ -160,8 +160,7 @@
     "expectFilm": "shawshank",
     "expectInTop": 3,
     "mustBeInCorpus": true,
-    "note": "verbatim",
-    "knownGap": "the line now splits at an ellipsis continuation in the rebuilt corpus; ellipsis-merge rule queued in the cleanup batch"
+    "note": "verbatim; rejoined by the ellipsis-merge rule in the cleanup batch"
   },
   {
     "query": "you talking to me",
@@ -267,7 +266,7 @@
     "expectInTop": 5,
     "mustBeInCorpus": false,
     "note": "film missing until rescue pass",
-    "knownGap": "se7en imsdb draft lacks the shot-film line; transcript upgrade pass will fix"
+    "knownGap": "se7en imsdb draft lacks the shot-film line; the upgrade pass could not replace it because the transcript source now bot-challenges, so it stays on the draft"
   },
   {
     "query": "play it again sam",
