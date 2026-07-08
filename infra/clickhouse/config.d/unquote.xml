@@ -1,7 +1,10 @@
 <!-- Server tuning for a shared 16GB box: ClickHouse gets at most half the RAM,
      and the system logs that silently eat disks are trimmed or disabled. -->
 <clickhouse>
-  <max_server_memory_usage_to_ram_ratio>0.5</max_server_memory_usage_to_ram_ratio>
+  <max_server_memory_usage_to_ram_ratio>0.65</max_server_memory_usage_to_ram_ratio>
+  <!-- All three HNSW indexes (lines 3.3GB, beats 1.9GB, segments 0.3GB) must
+       fit at once or queries thrash the cache reloading them. -->
+  <vector_similarity_index_cache_size>6442450944</vector_similarity_index_cache_size>
 
   <query_log replace="1">
     <database>system</database>
