@@ -135,15 +135,15 @@
 
       {#if data.response!.movie}
         {@const movie = data.response!.movie}
-        <div class="movie-banner">
+        <a class="movie-banner" href="/movie/{movie.movieId}">
           {#if posterUrl(movie.posterPath)}
             <img src={posterUrl(movie.posterPath)} alt="" width="46" height="69" />
           {/if}
           <div>
             <p class="movie-name">{movie.title} <span class="year">({movie.year})</span></p>
-            <p class="movie-note">That's a film. Its most memorable lines are coming soon.</p>
+            <p class="movie-note">Its five lines, timeline, and closest films.</p>
           </div>
-        </div>
+        </a>
       {/if}
 
       {#if hasResults}
@@ -400,6 +400,11 @@
     justify-content: space-between;
     font-size: 0.7rem;
     margin-top: 2px;
+  }
+
+  a.movie-banner {
+    text-decoration: none;
+    color: inherit;
   }
 
   .movie-banner {

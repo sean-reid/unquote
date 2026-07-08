@@ -231,6 +231,7 @@ async function nearestLines(id: number, vec: number[]): Promise<ExpandableNeighb
              1 - cosineDistance(vec, {vec:Array(Float32)}) AS score
       FROM lines
       WHERE movie_id != {id:UInt32}
+        AND movie_id NOT IN (SELECT movie_id FROM movie_quality WHERE non_english = 1)
       ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
       LIMIT 16
     `,
@@ -255,6 +256,7 @@ async function nearestBeats(id: number, vec: number[]): Promise<ExpandableNeighb
              1 - cosineDistance(vec, {vec:Array(Float32)}) AS score
       FROM beats
       WHERE movie_id != {id:UInt32}
+        AND movie_id NOT IN (SELECT movie_id FROM movie_quality WHERE non_english = 1 OR downrank = 1)
       ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
       LIMIT 16
     `,
@@ -277,6 +279,7 @@ async function nearestSegments(id: number, vec: number[]): Promise<ExpandableNei
              1 - cosineDistance(vec, {vec:Array(Float32)}) AS score
       FROM segments
       WHERE movie_id != {id:UInt32}
+        AND movie_id NOT IN (SELECT movie_id FROM movie_quality WHERE non_english = 1 OR downrank = 1)
       ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
       LIMIT 16
     `,
@@ -552,7 +555,7 @@ const BRIDGE_LAMBDA = 0.75;
  * franchise texture out while real parallels still clear the bar. Mirrored by
  * BRIDGE_EXCESS_THRESHOLD in the vs page's stroke mapping.
  */
-const BRIDGE_EXCESS_THRESHOLD = 0.14;
+const BRIDGE_EXCESS_THRESHOLD = 0.16;
 /** Above this ambient, two films sound alike throughout; the empty state says so. */
 export const BRIDGE_HIGH_AMBIENT = 0.22;
 const BRIDGE_PAIRS = 5;
@@ -602,6 +605,18 @@ const EMPTY_BRIDGE: BridgeResult = { pairs: [], ambient: 0 };
 
 export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
   const result = await rows(async () => {
+    // A wrong-language transcript matches its own language, not meaning; a
+    // bridge with such a film shows the distance state rather than noise.
+    const flagged = await db.query({
+      query:
+        'SELECT count() AS n FROM movie_quality WHERE movie_id IN ({a:UInt32}, {b:UInt32}) AND non_english = 1',
+      query_params: { a, b },
+      format: 'JSONEachRow',
+    });
+    if (Number(((await flagged.json()) as Array<{ n: string | number }>)[0]?.n) > 0) {
+      return EMPTY_BRIDGE;
+    }
+
     const [beatsA, beatsB] = await Promise.all([bridgeBeats(a), bridgeBeats(b)]);
     if (beatsA.length === 0 || beatsB.length === 0) return [EMPTY_BRIDGE];
 
@@ -659,6 +674,10 @@ export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
       picked.push(pair);
       if (picked.length === BRIDGE_PAIRS) break;
     }
+
+    // A single passing pair is always the dregs of the distribution; the
+    // honest empty state reads better than one weak ribbon.
+    if (picked.length < 2) picked.length = 0;
 
     const excerptOf = (text: string): string =>
       clip(text.split('\n').slice(0, EXCERPT_LINES).join(' '));
