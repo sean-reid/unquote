@@ -256,5 +256,119 @@
     "actual": "I am your father.",
     "film": "The Empire Strikes Back",
     "year": 1980
+  },
+  {
+    "popular": "Do or do not, there is no try",
+    "actual": "Try not. Do. Or do not. There is no try.",
+    "film": "The Empire Strikes Back",
+    "year": 1980
+  },
+  {
+    "popular": "Life finds a way",
+    "actual": "No, I'm simply saying that life finds a way.",
+    "film": "Jurassic Park",
+    "year": 1993
+  },
+  {
+    "popular": "Stop trying to make fetch happen",
+    "actual": "Gretchen, stop trying to make \"fetch\" happen. It's not going to happen.",
+    "film": "Mean Girls",
+    "year": 2004
+  },
+  {
+    "popular": "You know what's cooler than a million dollars? A billion dollars",
+    "actual": "A million dollars isn't cool. You know what's cool? A billion dollars.",
+    "film": "The Social Network",
+    "year": 2010
+  },
+  {
+    "popular": "I have a particular set of skills",
+    "actual": "But what I do have are a very particular set of skills.",
+    "film": "Taken",
+    "year": 2008
+  },
+  {
+    "popular": "It's not personal, it's strictly business",
+    "actual": "It's not personal, Sonny. It's strictly business.",
+    "film": "The Godfather",
+    "year": 1972
+  },
+  {
+    "popular": "I'm just a girl, standing in front of a boy, asking him to love her",
+    "actual": "I'm also just a girl, standing in front of a boy, asking him to love her.",
+    "film": "Notting Hill",
+    "year": 1999
+  },
+  {
+    "popular": "We all go a little crazy sometimes",
+    "actual": "We all go a little mad sometimes.",
+    "film": "Psycho",
+    "year": 1960
+  },
+  {
+    "popular": "Would you like to play a game?",
+    "actual": "I want to play a game.",
+    "film": "Saw",
+    "year": 2004
+  },
+  {
+    "popular": "Draw me like one of your French girls",
+    "actual": "Jack, I want you to draw me like one of your French girls. Wearing this.",
+    "film": "Titanic",
+    "year": 1997
+  },
+  {
+    "popular": "Like tears in the rain",
+    "actual": "All those moments will be lost in time, like tears in rain.",
+    "film": "Blade Runner",
+    "year": 1982
+  },
+  {
+    "popular": "I'm ready for my close-up, Mr. DeMille",
+    "actual": "All right, Mr. DeMille, I'm ready for my close-up.",
+    "film": "Sunset Boulevard",
+    "year": 1950
+  },
+  {
+    "popular": "He's alive!",
+    "actual": "It's alive! It's alive!",
+    "film": "Frankenstein",
+    "year": 1931
+  },
+  {
+    "popular": "It was beauty that killed the beast",
+    "actual": "It was beauty killed the beast.",
+    "film": "King Kong",
+    "year": 1933
+  },
+  {
+    "popular": "A man's gotta do what a man's gotta do",
+    "actual": "A man ought to do what he thinks is best.",
+    "film": "Hondo",
+    "year": 1953
+  },
+  {
+    "popular": "Please, sir, can I have some more?",
+    "actual": "Please, sir, I want some more.",
+    "film": "Oliver!",
+    "year": 1968
+  },
+  {
+    "popular": "I'm out of order? You're out of order! This whole court's out of order!",
+    "actual": "You're out of order! You're out of order! The whole trial is out of order! They're out of order!",
+    "film": "...And Justice for All",
+    "year": 1979
+  },
+  {
+    "popular": "Fly, my pretties, fly!",
+    "actual": "Now fly, fly!",
+    "film": "The Wizard of Oz",
+    "year": 1939
+  },
+  {
+    "popular": "Go ahead, make my day",
+    "actual": "Go ahead, make my day.",
+    "film": "Sudden Impact",
+    "year": 1983
   }
 ]
