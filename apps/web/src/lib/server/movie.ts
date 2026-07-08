@@ -42,6 +42,32 @@ export interface BridgePair {
 }
 
 const HNSW = { allow_experimental_vector_similarity_index: 1 };
+const MOVIE_META_MS = 60_000;
+
+interface MovieMeta {
+  id: number;
+  title: string;
+  year: number;
+  poster_path: string | null;
+}
+
+let movieMetaCache: { byId: Map<number, MovieMeta>; at: number } | null = null;
+
+/**
+ * Joining movies inside the HNSW queries forces ClickHouse to abandon the
+ * vector index and scan; hydrating titles from this small in-memory map keeps
+ * every nearest-x query on the index path.
+ */
+async function movieMeta(): Promise<Map<number, MovieMeta>> {
+  if (movieMetaCache && Date.now() - movieMetaCache.at < MOVIE_META_MS) return movieMetaCache.byId;
+  const result = await db.query({
+    query: 'SELECT id, title, year, poster_path FROM movies',
+    format: 'JSONEachRow',
+  });
+  const metas = (await result.json()) as MovieMeta[];
+  movieMetaCache = { byId: new Map(metas.map((m) => [m.id, m])), at: Date.now() };
+  return movieMetaCache.byId;
+}
 /** Server-enforced excerpt bound: never more than three lines per neighbor. */
 const EXCERPT_LINES = 3;
 const EXCERPT_CHARS = 220;
@@ -189,61 +215,79 @@ function toNeighbor(row: NeighborRow): MomentNeighbor {
   };
 }
 
+interface BareNeighborRow {
+  movie_id: number;
+  arc: number;
+  start_seq: number;
+  excerpt: string;
+  score: number;
+}
+
+async function hydrate(rows: BareNeighborRow[]): Promise<MomentNeighbor[]> {
+  const metas = await movieMeta();
+  return rows.flatMap((row) => {
+    const meta = metas.get(row.movie_id);
+    if (!meta) return [];
+    return [
+      toNeighbor({
+        ...row,
+        title: meta.title,
+        year: meta.year,
+        poster_path: meta.poster_path,
+      }),
+    ];
+  });
+}
+
 async function nearestLines(id: number, vec: number[]): Promise<MomentNeighbor[]> {
   const result = await db.query({
     query: `
-      SELECT l.movie_id AS movie_id, m.title AS title, m.year AS year,
-             m.poster_path AS poster_path, l.arc AS arc, l.seq AS start_seq,
-             l.text AS excerpt, 1 - cosineDistance(l.vec, {vec:Array(Float32)}) AS score
-      FROM lines AS l
-      INNER JOIN movies AS m ON m.id = l.movie_id
-      WHERE l.movie_id != {id:UInt32}
-      ORDER BY cosineDistance(l.vec, {vec:Array(Float32)}) ASC
+      SELECT movie_id, arc, seq AS start_seq, text AS excerpt,
+             1 - cosineDistance(vec, {vec:Array(Float32)}) AS score
+      FROM lines
+      WHERE movie_id != {id:UInt32}
+      ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
       LIMIT 16
     `,
     query_params: { id, vec },
     format: 'JSONEachRow',
     clickhouse_settings: HNSW,
   });
-  return dedupeByFilm(((await result.json()) as NeighborRow[]).map(toNeighbor), 8);
+  return dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
 }
 
 async function nearestBeats(id: number, vec: number[]): Promise<MomentNeighbor[]> {
   const result = await db.query({
     query: `
-      SELECT b.movie_id AS movie_id, m.title AS title, m.year AS year,
-             m.poster_path AS poster_path, b.arc AS arc, b.start_seq AS start_seq,
-             b.text AS excerpt, 1 - cosineDistance(b.vec, {vec:Array(Float32)}) AS score
-      FROM beats AS b
-      INNER JOIN movies AS m ON m.id = b.movie_id
-      WHERE b.movie_id != {id:UInt32}
-      ORDER BY cosineDistance(b.vec, {vec:Array(Float32)}) ASC
+      SELECT movie_id, arc, start_seq, text AS excerpt,
+             1 - cosineDistance(vec, {vec:Array(Float32)}) AS score
+      FROM beats
+      WHERE movie_id != {id:UInt32}
+      ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
       LIMIT 16
     `,
     query_params: { id, vec },
     format: 'JSONEachRow',
     clickhouse_settings: HNSW,
   });
-  return dedupeByFilm(((await result.json()) as NeighborRow[]).map(toNeighbor), 8);
+  return dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
 }
 
 async function nearestSegments(id: number, vec: number[]): Promise<MomentNeighbor[]> {
   const result = await db.query({
     query: `
-      SELECT s.movie_id AS movie_id, m.title AS title, m.year AS year,
-             m.poster_path AS poster_path, s.arc AS arc, s.start_seq AS start_seq,
-             '' AS excerpt, 1 - cosineDistance(s.vec, {vec:Array(Float32)}) AS score
-      FROM segments AS s
-      INNER JOIN movies AS m ON m.id = s.movie_id
-      WHERE s.movie_id != {id:UInt32}
-      ORDER BY cosineDistance(s.vec, {vec:Array(Float32)}) ASC
+      SELECT movie_id, arc, start_seq, '' AS excerpt,
+             1 - cosineDistance(vec, {vec:Array(Float32)}) AS score
+      FROM segments
+      WHERE movie_id != {id:UInt32}
+      ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
       LIMIT 16
     `,
     query_params: { id, vec },
     format: 'JSONEachRow',
     clickhouse_settings: HNSW,
   });
-  const neighbors = dedupeByFilm(((await result.json()) as NeighborRow[]).map(toNeighbor), 8);
+  const neighbors = dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
   await fillExcerpts(neighbors);
   return neighbors;
 }
@@ -311,10 +355,12 @@ async function movieNeighbors(id: number): Promise<MomentNeighbor[]> {
 /** All four dial levels for one scrub position, one request. */
 export async function neighborLevels(id: number, seq: number): Promise<NeighborLevels | null> {
   const started = Date.now();
-  const lineVec = await vectorOf('lines', id, 'seq = {seq:UInt32}', { seq });
-  if (!lineVec) return null;
+  const stage = (label: string, from: number) =>
+    console.log(`neighbors/${label}: ${Date.now() - from}ms`);
 
-  const [beatVec, segmentVec] = await Promise.all([
+  const vecsFrom = Date.now();
+  const [lineVec, beatVec, segmentVec] = await Promise.all([
+    vectorOf('lines', id, 'seq = {seq:UInt32}', { seq }),
     rows(() =>
       vectorOf('beats', id, 'start_seq <= {seq:UInt32} AND end_seq >= {seq:UInt32}', {
         seq,
@@ -326,56 +372,125 @@ export async function neighborLevels(id: number, seq: number): Promise<NeighborL
       }).then((v) => (v ? [v] : [])),
     ).then((v) => v[0] ?? null),
   ]);
+  stage('vectors', vecsFrom);
+  if (!lineVec) return null;
 
+  const timed = async (label: string, run: () => Promise<MomentNeighbor[]>) => {
+    const from = Date.now();
+    const out = await rows(run);
+    stage(label, from);
+    return out;
+  };
   const [line, beat, segment, movie] = await Promise.all([
-    rows(() => nearestLines(id, lineVec)),
-    beatVec ? rows(() => nearestBeats(id, beatVec)) : Promise.resolve([]),
-    segmentVec ? rows(() => nearestSegments(id, segmentVec)) : Promise.resolve([]),
-    rows(() => movieNeighbors(id)),
+    timed('line', () => nearestLines(id, lineVec)),
+    beatVec ? timed('beat', () => nearestBeats(id, beatVec)) : Promise.resolve([]),
+    segmentVec ? timed('segment', () => nearestSegments(id, segmentVec)) : Promise.resolve([]),
+    timed('movie', () => movieNeighbors(id)),
   ]);
 
   console.log(`neighbors: movie ${id} seq ${seq} in ${Date.now() - started}ms`);
   return { line, beat, segment, movie };
 }
 
-/** The five closest segment pairs between two films, both sides excerpted. */
-export async function bridgePairs(a: number, b: number): Promise<BridgePair[]> {
-  return rows(async () => {
-    const result = await db.query({
-      query: `
-        SELECT sa.arc AS arcA, sb.arc AS arcB,
-               sa.start_seq AS startSeqA, sb.start_seq AS startSeqB,
-               1 - cosineDistance(sa.vec, sb.vec) AS score
-        FROM segments AS sa
-        CROSS JOIN segments AS sb
-        WHERE sa.movie_id = {a:UInt32} AND sb.movie_id = {b:UInt32}
-        ORDER BY cosineDistance(sa.vec, sb.vec) ASC
-        LIMIT 5
-      `,
-      query_params: { a, b },
+/**
+ * Bridge matching runs at beat width: beat vectors are sharper than averaged
+ * segments, and the displayed excerpt is then the matching moment itself.
+ * Genericness (a beat's mean similarity to its closest cross-corpus
+ * neighbors, computed in the pipeline) is subtracted so universal filler
+ * cannot win; greedy one-to-one assignment stops magnet moments repeating;
+ * pairs below the strength bar are dropped entirely, and an empty result is
+ * rendered honestly rather than padded with mush.
+ */
+// Tuned against fixture pairs with live genericness values: 0.75 separates
+// distinctive thematic matches from common genre texture; 0.30 lets related
+// war/mob/sci-fi pairs through while unrelated films (Toy Story vs Se7en)
+// honestly show nothing.
+const BRIDGE_LAMBDA = 0.75;
+const BRIDGE_THRESHOLD = 0.3;
+const BRIDGE_PAIRS = 5;
+
+interface BridgeBeat {
+  idx: number;
+  start_seq: number;
+  arc: number;
+  text: string;
+  vec: number[];
+  generic: number;
+}
+
+let beatsHaveGeneric: boolean | null = null;
+
+async function bridgeBeats(movieId: number): Promise<BridgeBeat[]> {
+  if (beatsHaveGeneric === null) {
+    const probe = await db.query({
+      query:
+        "SELECT count() AS n FROM system.columns WHERE database = currentDatabase() AND table = 'beats' AND name = 'generic'",
       format: 'JSONEachRow',
     });
-    const pairs = (await result.json()) as Array<{
-      arcA: number;
-      arcB: number;
-      startSeqA: number;
-      startSeqB: number;
-      score: number;
-    }>;
-    if (pairs.length === 0) return [];
+    beatsHaveGeneric = Number(((await probe.json()) as Array<{ n: string | number }>)[0]?.n) > 0;
+  }
+  const genericExpr = beatsHaveGeneric ? 'generic' : '0 AS generic';
+  const result = await db.query({
+    query: `SELECT idx, start_seq, arc, text, vec, ${genericExpr} FROM beats WHERE movie_id = {id:UInt32} ORDER BY idx`,
+    query_params: { id: movieId },
+    format: 'JSONEachRow',
+  });
+  return (await result.json()) as BridgeBeat[];
+}
 
-    const sides: MomentNeighbor[] = [];
-    for (const pair of pairs) {
-      sides.push(
-        { movieId: a, startSeq: pair.startSeqA } as MomentNeighbor,
-        { movieId: b, startSeq: pair.startSeqB } as MomentNeighbor,
-      );
+function dot(a: number[], b: number[]): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += a[i]! * b[i]!;
+  return sum;
+}
+
+export async function bridgePairs(a: number, b: number): Promise<BridgePair[]> {
+  return rows(async () => {
+    const [beatsA, beatsB] = await Promise.all([bridgeBeats(a), bridgeBeats(b)]);
+    if (beatsA.length === 0 || beatsB.length === 0) return [];
+
+    interface Scored {
+      ia: number;
+      ib: number;
+      strength: number;
     }
-    await fillExcerpts(sides);
-    return pairs.map((pair, i) => ({
-      ...pair,
-      excerptA: sides[i * 2]!.excerpt,
-      excerptB: sides[i * 2 + 1]!.excerpt,
-    }));
+    const scored: Scored[] = [];
+    for (let ia = 0; ia < beatsA.length; ia++) {
+      const beatA = beatsA[ia]!;
+      for (let ib = 0; ib < beatsB.length; ib++) {
+        const beatB = beatsB[ib]!;
+        const strength =
+          dot(beatA.vec, beatB.vec) - (BRIDGE_LAMBDA * (beatA.generic + beatB.generic)) / 2;
+        if (strength >= BRIDGE_THRESHOLD) scored.push({ ia, ib, strength });
+      }
+    }
+    scored.sort((x, y) => y.strength - x.strength);
+
+    const usedA = new Set<number>();
+    const usedB = new Set<number>();
+    const picked: Scored[] = [];
+    for (const pair of scored) {
+      if (usedA.has(pair.ia) || usedB.has(pair.ib)) continue;
+      usedA.add(pair.ia);
+      usedB.add(pair.ib);
+      picked.push(pair);
+      if (picked.length === BRIDGE_PAIRS) break;
+    }
+
+    const excerptOf = (text: string): string =>
+      clip(text.split('\n').slice(0, EXCERPT_LINES).join(' '));
+    return picked.map((pair) => {
+      const beatA = beatsA[pair.ia]!;
+      const beatB = beatsB[pair.ib]!;
+      return {
+        arcA: beatA.arc,
+        arcB: beatB.arc,
+        startSeqA: beatA.start_seq,
+        startSeqB: beatB.start_seq,
+        excerptA: excerptOf(beatA.text),
+        excerptB: excerptOf(beatB.text),
+        score: pair.strength,
+      };
+    });
   });
 }

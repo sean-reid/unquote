@@ -1,5 +1,4 @@
 import {
-  EMBED_DIM,
   diffStats,
   normalize,
   rrf,
@@ -12,7 +11,7 @@ import {
   type SearchResponse,
 } from '@unquote/shared';
 import { db } from './db.js';
-import { embedQuery } from './embed.js';
+import { embedQuery, embedQueryWide, WIDE_EMBED_DIM } from './embed.js';
 import misquoteEntries from './misquotes.json' with { type: 'json' };
 
 interface MovieRow {
@@ -165,9 +164,9 @@ async function beatsAvailable(): Promise<boolean> {
       format: 'JSONEachRow',
     });
     const rows = (await result.json()) as Array<{ dim: number }>;
-    beatsUsable = rows[0]?.dim === EMBED_DIM;
+    beatsUsable = rows[0]?.dim === WIDE_EMBED_DIM;
     if (rows.length > 0 && !beatsUsable) {
-      console.log(`beats disabled for search: dim ${rows[0]!.dim} != ${EMBED_DIM}`);
+      console.log(`beats disabled for search: dim ${rows[0]!.dim} != ${WIDE_EMBED_DIM}`);
     }
   } catch {
     beatsUsable = null;
@@ -182,7 +181,7 @@ async function beatsAvailable(): Promise<boolean> {
  */
 async function beatsArm(query: string): Promise<BeatRow[]> {
   if (!(await beatsAvailable())) return [];
-  const vec = await embedQuery(query);
+  const vec = await embedQueryWide(query);
   const result = await db.query({
     query: `
       SELECT movie_id, start_seq, arc, text
