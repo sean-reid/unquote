@@ -20,7 +20,6 @@ export interface SegmentBlock {
   startSeq: number;
   endSeq: number;
   arc: number;
-  snippet: string;
 }
 
 export interface SimilarMovie {
@@ -134,8 +133,7 @@ export async function segmentBlocks(id: number): Promise<SegmentBlock[]> {
   return rows(async () => {
     const result = await db.query({
       query: `
-        SELECT s.idx AS idx, s.start_seq AS startSeq, s.end_seq AS endSeq, s.arc AS arc,
-               (SELECT text FROM lines WHERE movie_id = {id:UInt32} AND seq = s.start_seq) AS snippet
+        SELECT s.idx AS idx, s.start_seq AS startSeq, s.end_seq AS endSeq, s.arc AS arc
         FROM segments AS s
         WHERE s.movie_id = {id:UInt32}
         ORDER BY s.idx
@@ -166,25 +164,6 @@ export async function similarMovies(id: number): Promise<SimilarMovie[]> {
   });
 }
 
-interface VecRow {
-  vec: number[];
-}
-
-async function vectorOf(
-  table: 'lines' | 'beats' | 'segments',
-  id: number,
-  where: string,
-  params: Record<string, number>,
-): Promise<number[] | null> {
-  const result = await db.query({
-    query: `SELECT vec FROM ${table} WHERE movie_id = {id:UInt32} AND ${where} LIMIT 1`,
-    query_params: { id, ...params },
-    format: 'JSONEachRow',
-  });
-  const found = (await result.json()) as VecRow[];
-  return found[0]?.vec ?? null;
-}
-
 function clip(text: string): string {
   if (text.length <= EXCERPT_CHARS) return text;
   const cut = text.slice(0, EXCERPT_CHARS);
@@ -202,7 +181,12 @@ interface NeighborRow {
   score: number;
 }
 
-function toNeighbor(row: NeighborRow): MomentNeighbor {
+export type ExpandableNeighbor = MomentNeighbor & {
+  /** Fuller subtitle-style excerpt for the in-place preview, capped server-side. */
+  expandedLines: string[];
+};
+
+function toNeighbor(row: NeighborRow): ExpandableNeighbor {
   return {
     movieId: row.movie_id,
     title: row.title,
@@ -212,6 +196,7 @@ function toNeighbor(row: NeighborRow): MomentNeighbor {
     excerpt: clip(row.excerpt),
     startSeq: row.start_seq,
     score: row.score,
+    expandedLines: [],
   };
 }
 
@@ -223,7 +208,7 @@ interface BareNeighborRow {
   score: number;
 }
 
-async function hydrate(rows: BareNeighborRow[]): Promise<MomentNeighbor[]> {
+async function hydrate(rows: BareNeighborRow[]): Promise<ExpandableNeighbor[]> {
   const metas = await movieMeta();
   return rows.flatMap((row) => {
     const meta = metas.get(row.movie_id);
@@ -239,7 +224,7 @@ async function hydrate(rows: BareNeighborRow[]): Promise<MomentNeighbor[]> {
   });
 }
 
-async function nearestLines(id: number, vec: number[]): Promise<MomentNeighbor[]> {
+async function nearestLines(id: number, vec: number[]): Promise<ExpandableNeighbor[]> {
   const result = await db.query({
     query: `
       SELECT movie_id, arc, seq AS start_seq, text AS excerpt,
@@ -253,10 +238,17 @@ async function nearestLines(id: number, vec: number[]): Promise<MomentNeighbor[]
     format: 'JSONEachRow',
     clickhouse_settings: HNSW,
   });
-  return dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
+  const neighbors = dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
+  await fillWindows(neighbors, 12);
+  return neighbors;
 }
 
-async function nearestBeats(id: number, vec: number[]): Promise<MomentNeighbor[]> {
+/** First lines of a newline-joined text, breaks preserved for subtitle rendering. */
+function excerptLines(text: string, lines = EXCERPT_LINES): string {
+  return clip(text.split('\n').slice(0, lines).join('\n'));
+}
+
+async function nearestBeats(id: number, vec: number[]): Promise<ExpandableNeighbor[]> {
   const result = await db.query({
     query: `
       SELECT movie_id, arc, start_seq, text AS excerpt,
@@ -270,10 +262,15 @@ async function nearestBeats(id: number, vec: number[]): Promise<MomentNeighbor[]
     format: 'JSONEachRow',
     clickhouse_settings: HNSW,
   });
-  return dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
+  const neighbors = dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
+  for (const n of neighbors) {
+    n.expandedLines = n.excerpt.split('\n').filter(Boolean).slice(0, SOURCE_MAX_LINES);
+    n.excerpt = excerptLines(n.excerpt);
+  }
+  return neighbors;
 }
 
-async function nearestSegments(id: number, vec: number[]): Promise<MomentNeighbor[]> {
+async function nearestSegments(id: number, vec: number[]): Promise<ExpandableNeighbor[]> {
   const result = await db.query({
     query: `
       SELECT movie_id, arc, start_seq, '' AS excerpt,
@@ -288,12 +285,12 @@ async function nearestSegments(id: number, vec: number[]): Promise<MomentNeighbo
     clickhouse_settings: HNSW,
   });
   const neighbors = dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
-  await fillExcerpts(neighbors);
+  await fillWindows(neighbors, SOURCE_MAX_LINES);
   return neighbors;
 }
 
-/** One query fills the opening lines of every segment neighbor. */
-async function fillExcerpts(neighbors: MomentNeighbor[]): Promise<void> {
+/** One batched query fills each neighbor's preview window and collapsed excerpt. */
+async function fillWindows(neighbors: ExpandableNeighbor[], window: number): Promise<void> {
   if (neighbors.length === 0) return;
   const clauses = neighbors
     .map((_, i) => `(movie_id = {m${i}:UInt32} AND seq >= {s${i}:UInt32} AND seq < {e${i}:UInt32})`)
@@ -302,7 +299,7 @@ async function fillExcerpts(neighbors: MomentNeighbor[]): Promise<void> {
   neighbors.forEach((n, i) => {
     params[`m${i}`] = n.movieId;
     params[`s${i}`] = n.startSeq;
-    params[`e${i}`] = n.startSeq + EXCERPT_LINES;
+    params[`e${i}`] = n.startSeq + window;
   });
   const result = await db.query({
     query: `SELECT movie_id, seq, text FROM lines WHERE ${clauses} ORDER BY movie_id, seq`,
@@ -312,23 +309,26 @@ async function fillExcerpts(neighbors: MomentNeighbor[]): Promise<void> {
   const lines = (await result.json()) as Array<{ movie_id: number; seq: number; text: string }>;
   for (const neighbor of neighbors) {
     // Constrain by seq range too: two neighbors from the same film must not
-    // share one merged excerpt.
+    // share one merged window.
     const own = lines
       .filter(
         (l) =>
           l.movie_id === neighbor.movieId &&
           l.seq >= neighbor.startSeq &&
-          l.seq < neighbor.startSeq + EXCERPT_LINES,
+          l.seq < neighbor.startSeq + window,
       )
       .map((l) => l.text);
-    neighbor.excerpt = clip(own.join(' '));
+    neighbor.expandedLines = own.slice(0, SOURCE_MAX_LINES);
+    if (neighbor.excerpt === '' || window > EXCERPT_LINES) {
+      neighbor.excerpt = clip(own.slice(0, EXCERPT_LINES).join('\n'));
+    }
   }
 }
 
 /** One neighbor per film, best first; variety beats near-duplicates in a short list. */
-function dedupeByFilm(neighbors: MomentNeighbor[], keep: number): MomentNeighbor[] {
+function dedupeByFilm(neighbors: ExpandableNeighbor[], keep: number): ExpandableNeighbor[] {
   const seen = new Set<number>();
-  const out: MomentNeighbor[] = [];
+  const out: ExpandableNeighbor[] = [];
   for (const neighbor of neighbors) {
     if (seen.has(neighbor.movieId)) continue;
     seen.add(neighbor.movieId);
@@ -338,7 +338,7 @@ function dedupeByFilm(neighbors: MomentNeighbor[], keep: number): MomentNeighbor
   return out;
 }
 
-async function movieNeighbors(id: number): Promise<MomentNeighbor[]> {
+async function movieNeighbors(id: number): Promise<ExpandableNeighbor[]> {
   const similar = await similarMovies(id);
   return similar.map((s) => ({
     movieId: s.movieId,
@@ -349,47 +349,186 @@ async function movieNeighbors(id: number): Promise<MomentNeighbor[]> {
     excerpt: '',
     startSeq: 0,
     score: s.score,
+    expandedLines: [],
   }));
 }
 
+/** The selected part itself, rendered at each ladder level. */
+export interface SourceContext {
+  /** The block's most distinctive line; also the line-level query subject. */
+  line: { seq: number; arc: number; text: string };
+  beat: { startSeq: number; lines: string[] } | null;
+  segment: { startSeq: number; lines: string[]; totalLines: number } | null;
+}
+
+export type NeighborPayload = {
+  [Level in keyof NeighborLevels]: ExpandableNeighbor[];
+} & { source: SourceContext };
+
+/** Hard bound on how much of a scene one request may reveal. */
+const SOURCE_MAX_LINES = 25;
+
+interface SpanRow {
+  start_seq: number;
+  end_seq: number;
+  text: string;
+  vec: number[];
+}
+
+/**
+ * Windows overlap by construction (segments inherit beat stride), so plain
+ * containment picks the EARLIER overlapping window and every click lands one
+ * part back. Resolution is by nearest midpoint among containers, or by exact
+ * idx when the client says which block it clicked.
+ */
+async function spanOf(
+  table: 'beats' | 'segments',
+  id: number,
+  seq: number,
+  idx: number | null = null,
+): Promise<SpanRow | null> {
+  const byIdx = idx !== null && table === 'segments';
+  const found = await rows(async () => {
+    const result = await db.query({
+      query: byIdx
+        ? `SELECT start_seq, end_seq, '' AS text, vec FROM segments
+           WHERE movie_id = {id:UInt32} AND idx = {idx:UInt32} LIMIT 1`
+        : `SELECT start_seq, end_seq, ${table === 'beats' ? 'text' : "'' AS text"}, vec
+           FROM ${table}
+           WHERE movie_id = {id:UInt32} AND start_seq <= {seq:UInt32} AND end_seq >= {seq:UInt32}
+           ORDER BY abs(toInt64(start_seq + end_seq) - 2 * {seq:Int64}) ASC
+           LIMIT 1`,
+      query_params: { id, seq, idx: idx ?? 0 },
+      format: 'JSONEachRow',
+    });
+    return (await result.json()) as SpanRow[];
+  });
+  return found[0] ?? null;
+}
+
+interface DistinctiveRow {
+  seq: number;
+  arc: number;
+  text: string;
+  vec: number[];
+}
+
+/**
+ * The line of the span closest to the span's own line-vector centroid: the
+ * block's most representative moment, shown as the subject and queried at
+ * line width so the user compares against exactly what they see. Segment
+ * vectors live in the 768d beat space, so representativeness is computed
+ * natively in the 384d line space instead.
+ */
+async function distinctiveLine(
+  id: number,
+  seq: number,
+  span: SpanRow | null,
+): Promise<DistinctiveRow | null> {
+  if (span) {
+    const centroidRows = await rows(async () => {
+      const result = await db.query({
+        query: `SELECT avgForEach(vec) AS centroid FROM lines
+                WHERE movie_id = {id:UInt32} AND seq >= {s:UInt32} AND seq <= {e:UInt32}`,
+        query_params: { id, s: span.start_seq, e: span.end_seq },
+        format: 'JSONEachRow',
+      });
+      return (await result.json()) as Array<{ centroid: number[] }>;
+    });
+    const centroid = centroidRows[0]?.centroid;
+    if (centroid && centroid.length > 0) {
+      const found = await rows(async () => {
+        const result = await db.query({
+          query: `
+            SELECT seq, arc, text, vec FROM lines
+            WHERE movie_id = {id:UInt32} AND seq >= {s:UInt32} AND seq <= {e:UInt32}
+            ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
+            LIMIT 1
+          `,
+          query_params: { id, s: span.start_seq, e: span.end_seq, vec: centroid },
+          format: 'JSONEachRow',
+        });
+        return (await result.json()) as DistinctiveRow[];
+      });
+      if (found[0]) return found[0];
+    }
+  }
+  const fallback = await rows(async () => {
+    const result = await db.query({
+      query:
+        'SELECT seq, arc, text, vec FROM lines WHERE movie_id = {id:UInt32} AND seq = {seq:UInt32} LIMIT 1',
+      query_params: { id, seq },
+      format: 'JSONEachRow',
+    });
+    return (await result.json()) as DistinctiveRow[];
+  });
+  return fallback[0] ?? null;
+}
+
+async function segmentSourceLines(
+  id: number,
+  span: SpanRow,
+): Promise<{ lines: string[]; totalLines: number }> {
+  const capEnd = Math.min(span.start_seq + SOURCE_MAX_LINES - 1, span.end_seq);
+  const found = await rows(async () => {
+    const result = await db.query({
+      query: `SELECT text FROM lines
+              WHERE movie_id = {id:UInt32} AND seq >= {s:UInt32} AND seq <= {e:UInt32}
+              ORDER BY seq`,
+      query_params: { id, s: span.start_seq, e: capEnd },
+      format: 'JSONEachRow',
+    });
+    return (await result.json()) as Array<{ text: string }>;
+  });
+  return { lines: found.map((r) => r.text), totalLines: span.end_seq - span.start_seq + 1 };
+}
+
 /** All four dial levels for one scrub position, one request. */
-export async function neighborLevels(id: number, seq: number): Promise<NeighborLevels | null> {
+export async function neighborLevels(
+  id: number,
+  seq: number,
+  segmentIdx: number | null = null,
+): Promise<NeighborPayload | null> {
   const started = Date.now();
   const stage = (label: string, from: number) =>
     console.log(`neighbors/${label}: ${Date.now() - from}ms`);
 
   const vecsFrom = Date.now();
-  const [lineVec, beatVec, segmentVec] = await Promise.all([
-    vectorOf('lines', id, 'seq = {seq:UInt32}', { seq }),
-    rows(() =>
-      vectorOf('beats', id, 'start_seq <= {seq:UInt32} AND end_seq >= {seq:UInt32}', {
-        seq,
-      }).then((v) => (v ? [v] : [])),
-    ).then((v) => v[0] ?? null),
-    rows(() =>
-      vectorOf('segments', id, 'start_seq <= {seq:UInt32} AND end_seq >= {seq:UInt32}', {
-        seq,
-      }).then((v) => (v ? [v] : [])),
-    ).then((v) => v[0] ?? null),
-  ]);
+  const segmentSpan = await spanOf('segments', id, seq, segmentIdx);
+  // Inside an explicit block selection, the beat is the one at its center.
+  const beatSeq = segmentSpan ? Math.floor((segmentSpan.start_seq + segmentSpan.end_seq) / 2) : seq;
+  const beatSpan = await spanOf('beats', id, segmentIdx !== null ? beatSeq : seq);
+  const subject = await distinctiveLine(id, seq, segmentSpan);
   stage('vectors', vecsFrom);
-  if (!lineVec) return null;
+  if (!subject) return null;
 
-  const timed = async (label: string, run: () => Promise<MomentNeighbor[]>) => {
+  const timed = async (label: string, run: () => Promise<ExpandableNeighbor[]>) => {
     const from = Date.now();
     const out = await rows(run);
     stage(label, from);
     return out;
   };
-  const [line, beat, segment, movie] = await Promise.all([
-    timed('line', () => nearestLines(id, lineVec)),
-    beatVec ? timed('beat', () => nearestBeats(id, beatVec)) : Promise.resolve([]),
-    segmentVec ? timed('segment', () => nearestSegments(id, segmentVec)) : Promise.resolve([]),
+  const [line, beat, segment, movie, segmentSource] = await Promise.all([
+    timed('line', () => nearestLines(id, subject.vec)),
+    beatSpan ? timed('beat', () => nearestBeats(id, beatSpan.vec)) : Promise.resolve([]),
+    segmentSpan
+      ? timed('segment', () => nearestSegments(id, segmentSpan.vec))
+      : Promise.resolve([]),
     timed('movie', () => movieNeighbors(id)),
+    segmentSpan ? segmentSourceLines(id, segmentSpan) : Promise.resolve(null),
   ]);
 
+  const source: SourceContext = {
+    line: { seq: subject.seq, arc: subject.arc, text: subject.text },
+    beat: beatSpan
+      ? { startSeq: beatSpan.start_seq, lines: beatSpan.text.split('\n').filter(Boolean) }
+      : null,
+    segment:
+      segmentSpan && segmentSource ? { startSeq: segmentSpan.start_seq, ...segmentSource } : null,
+  };
+
   console.log(`neighbors: movie ${id} seq ${seq} in ${Date.now() - started}ms`);
-  return { line, beat, segment, movie };
+  return { line, beat, segment, movie, source };
 }
 
 /**
@@ -406,7 +545,16 @@ export async function neighborLevels(id: number, seq: number): Promise<NeighborL
 // war/mob/sci-fi pairs through while unrelated films (Toy Story vs Se7en)
 // honestly show nothing.
 const BRIDGE_LAMBDA = 0.75;
-const BRIDGE_THRESHOLD = 0.3;
+/**
+ * Pairs must beat the two films' AMBIENT cross-similarity by this much. Same
+ * franchise films share names, idiom, and character voice, so their raw
+ * scores run high everywhere; thresholding the excess over ambient keeps
+ * franchise texture out while real parallels still clear the bar. Mirrored by
+ * BRIDGE_EXCESS_THRESHOLD in the vs page's stroke mapping.
+ */
+const BRIDGE_EXCESS_THRESHOLD = 0.14;
+/** Above this ambient, two films sound alike throughout; the empty state says so. */
+export const BRIDGE_HIGH_AMBIENT = 0.22;
 const BRIDGE_PAIRS = 5;
 
 interface BridgeBeat {
@@ -444,24 +592,59 @@ function dot(a: number[], b: number[]): number {
   return sum;
 }
 
-export async function bridgePairs(a: number, b: number): Promise<BridgePair[]> {
-  return rows(async () => {
+export interface BridgeResult {
+  pairs: BridgePair[];
+  /** Mean adjusted cross-similarity of the two films: how alike they sound overall. */
+  ambient: number;
+}
+
+const EMPTY_BRIDGE: BridgeResult = { pairs: [], ambient: 0 };
+
+export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
+  const result = await rows(async () => {
     const [beatsA, beatsB] = await Promise.all([bridgeBeats(a), bridgeBeats(b)]);
-    if (beatsA.length === 0 || beatsB.length === 0) return [];
+    if (beatsA.length === 0 || beatsB.length === 0) return [EMPTY_BRIDGE];
+
+    const adjusted = (beatA: BridgeBeat, beatB: BridgeBeat): number =>
+      dot(beatA.vec, beatB.vec) - (BRIDGE_LAMBDA * (beatA.generic + beatB.generic)) / 2;
+
+    // One pass over the full cross product: keep every adjusted score plus
+    // per-beat means. A real parallel is a spike above what its beat scores
+    // against the whole other film; franchise texture is a plateau, high
+    // everywhere and peaked nowhere.
+    const nA = beatsA.length;
+    const nB = beatsB.length;
+    const cross = new Float32Array(nA * nB);
+    const meanA = new Float64Array(nA);
+    const meanB = new Float64Array(nB);
+    let ambientSum = 0;
+    for (let ia = 0; ia < nA; ia++) {
+      const beatA = beatsA[ia]!;
+      for (let ib = 0; ib < nB; ib++) {
+        const score = adjusted(beatA, beatsB[ib]!);
+        cross[ia * nB + ib] = score;
+        meanA[ia] = (meanA[ia] ?? 0) + score;
+        meanB[ib] = (meanB[ib] ?? 0) + score;
+        ambientSum += score;
+      }
+    }
+    for (let ia = 0; ia < nA; ia++) meanA[ia] = meanA[ia]! / nB;
+    for (let ib = 0; ib < nB; ib++) meanB[ib] = meanB[ib]! / nA;
+    const ambient = nA * nB > 0 ? ambientSum / (nA * nB) : 0;
 
     interface Scored {
       ia: number;
       ib: number;
       strength: number;
     }
+    // Contrast gates texture out; adjusted strength ranks what remains, so a
+    // universally resonant opening still beats a merely spiky exchange.
     const scored: Scored[] = [];
-    for (let ia = 0; ia < beatsA.length; ia++) {
-      const beatA = beatsA[ia]!;
-      for (let ib = 0; ib < beatsB.length; ib++) {
-        const beatB = beatsB[ib]!;
-        const strength =
-          dot(beatA.vec, beatB.vec) - (BRIDGE_LAMBDA * (beatA.generic + beatB.generic)) / 2;
-        if (strength >= BRIDGE_THRESHOLD) scored.push({ ia, ib, strength });
+    for (let ia = 0; ia < nA; ia++) {
+      for (let ib = 0; ib < nB; ib++) {
+        const score = cross[ia * nB + ib]!;
+        const contrast = score - (meanA[ia]! + meanB[ib]!) / 2;
+        if (contrast >= BRIDGE_EXCESS_THRESHOLD) scored.push({ ia, ib, strength: score });
       }
     }
     scored.sort((x, y) => y.strength - x.strength);
@@ -479,7 +662,8 @@ export async function bridgePairs(a: number, b: number): Promise<BridgePair[]> {
 
     const excerptOf = (text: string): string =>
       clip(text.split('\n').slice(0, EXCERPT_LINES).join(' '));
-    return picked.map((pair) => {
+    console.log(`bridge ${a} vs ${b}: ambient ${ambient.toFixed(3)}, ${picked.length} pairs`);
+    const pairs = picked.map((pair) => {
       const beatA = beatsA[pair.ia]!;
       const beatB = beatsB[pair.ib]!;
       return {
@@ -492,5 +676,7 @@ export async function bridgePairs(a: number, b: number): Promise<BridgePair[]> {
         score: pair.strength,
       };
     });
+    return [{ pairs, ambient }];
   });
+  return result[0] ?? EMPTY_BRIDGE;
 }
