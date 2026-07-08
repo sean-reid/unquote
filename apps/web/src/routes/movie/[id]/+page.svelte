@@ -25,6 +25,8 @@
   let dragging = $state(false);
   let dragFrom: number | null = null;
   let dragMoved = false;
+  /** Mobile sheet: expanded shows the panel, docked leaves the handle peeking. */
+  let sheet = $state<'expanded' | 'docked'>('expanded');
 
   const shown = $derived<ExpandableNeighbor[]>(levels ? levels[level] : []);
   // Windows overlap, so identity beats containment: an explicit idx wins, and
@@ -63,6 +65,7 @@
   async function select(seq: number, idx: number | null = null) {
     selectedSeq = seq;
     selectedIdx = idx;
+    sheet = 'expanded';
     loading = true;
     levels = null;
     expanded = false;
@@ -77,20 +80,25 @@
     }
   }
 
-  function close() {
-    selectedSeq = null;
-    selectedIdx = null;
-    levels = null;
-    expanded = false;
-    expandedNeighbor = null;
+  function dock() {
+    sheet = 'docked';
     dragY = 0;
+  }
+
+  function expand() {
+    sheet = 'expanded';
+    dragY = 0;
+  }
+
+  function toggleSheet() {
+    if (sheet === 'docked') expand();
+    else dock();
   }
 
   let provisionalIdx = $state<number | null>(null);
   let scrubbing = false;
   let scrubFromX: number | null = null;
   let scrubMoved = false;
-  let scrubSession = false;
 
   function segmentAtX(strip: HTMLElement, clientX: number) {
     // Resolve against rendered geometry, not weight fractions: flex basis and
@@ -115,7 +123,6 @@
 
   function onScrubDown(event: PointerEvent) {
     scrubbing = true;
-    scrubSession = true;
     scrubFromX = event.clientX;
     scrubMoved = false;
     provisionalIdx = segmentAtX(event.currentTarget as HTMLElement, event.clientX).idx;
@@ -158,7 +165,6 @@
   // them, the strip resolves clicks landing in gaps, and pointer events only
   // add drag-to-scrub where they exist.
   function onScrubClick(event: MouseEvent) {
-    scrubSession = false;
     // A drag already selected on release; its trailing click must not reselect.
     if (scrubMoved) {
       scrubMoved = false;
@@ -194,8 +200,10 @@
 
   function onPointerMove(event: PointerEvent) {
     if (!dragging || dragFrom === null) return;
-    dragY = Math.max(0, event.clientY - dragFrom);
-    if (dragY > 5) dragMoved = true;
+    const delta = event.clientY - dragFrom;
+    // Expanded sheets drag down toward the dock; docked sheets drag up.
+    dragY = sheet === 'expanded' ? Math.max(0, delta) : Math.min(0, delta);
+    if (Math.abs(dragY) > 5) dragMoved = true;
   }
 
   function onPointerUp(event: PointerEvent) {
@@ -212,9 +220,13 @@
       // Synthetic test events carry no active pointer.
     }
     // iOS skips click synthesis for captured pointers, so the tap must be
-    // recognized here: a press that never really moved is a close.
-    if (dragY > 60 || !dragMoved) {
-      setTimeout(close, 0);
+    // recognized here: a press that never really moved toggles the state.
+    if (!dragMoved) {
+      setTimeout(toggleSheet, 0);
+    } else if (sheet === 'expanded' && dragY > 60) {
+      setTimeout(dock, 0);
+    } else if (sheet === 'docked' && dragY < -40) {
+      setTimeout(expand, 0);
     } else {
       dragY = 0;
     }
@@ -223,7 +235,7 @@
   function onHandleClick(event: MouseEvent) {
     // Pointer taps are handled in onPointerUp; this path serves the keyboard,
     // whose synthetic clicks carry detail 0.
-    if (event.detail === 0) close();
+    if (event.detail === 0) toggleSheet();
   }
 
   // SvelteKit reuses this component across client-side navigations between
@@ -265,7 +277,9 @@
   />
 </svelte:head>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && selectedSeq !== null && close()} />
+<svelte:window
+  onkeydown={(e) => e.key === 'Escape' && selectedSeq !== null && sheet === 'expanded' && dock()}
+/>
 
 <main>
   <a class="home" href={resolve('/')}>Unquote</a>
@@ -339,18 +353,22 @@
   {/if}
 
   {#if selectedSeq !== null}
-    <button class="backdrop" aria-label="Close" onclick={close}></button>
+    {#if sheet === 'expanded'}
+      <button class="backdrop" aria-label="Collapse panel" onclick={dock}></button>
+    {/if}
     <section
       class="panel"
       class:dragging
       data-state={loading ? 'loading' : 'ready'}
       data-level={level}
-      style:translate="0 {dragY}px"
+      data-sheet={sheet}
+      style:--drag-y="{dragY}px"
       aria-label="The selected moment and similar moments in other films"
     >
       <button
         class="handle"
-        aria-label="Close panel"
+        aria-label={sheet === 'docked' ? 'Expand panel' : 'Collapse panel'}
+        aria-expanded={sheet === 'expanded'}
         onclick={onHandleClick}
         onpointerdown={onPointerDown}
         onpointermove={onPointerMove}
@@ -922,14 +940,23 @@
       left: 0;
       right: 0;
       bottom: 0;
-      max-height: 60dvh;
+      height: 60dvh;
       overflow-y: auto;
       border-radius: var(--radius-lg) var(--radius-lg) 0 0;
       border-bottom: none;
       box-shadow: 0 -8px 30px rgb(0 0 0 / 0.4);
       z-index: 10;
       padding-top: 0;
+      --dock-base: 0px;
+      translate: 0 calc(var(--dock-base) + var(--drag-y, 0px));
       transition: translate 150ms ease;
+    }
+
+    /* Docked: the handle strip peeks with room above the home indicator, so
+       a thumb can find it without fishing at the screen's very edge. */
+    .panel[data-sheet='docked'] {
+      --dock-base: calc(100% - 76px - env(safe-area-inset-bottom, 0px));
+      overflow-y: hidden;
     }
 
     .panel.dragging {

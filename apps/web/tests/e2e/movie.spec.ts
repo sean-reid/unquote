@@ -200,19 +200,28 @@ test('a neighbor card previews in place, then opens in the film', async ({ page 
   await expect(page).toHaveURL(/\/movie\/\d+\?seq=\d+/);
 });
 
-test('the sheet closes from the handle and the backdrop', async ({ page }, testInfo) => {
+test('the handle and backdrop dock the sheet instead of destroying it', async ({
+  page,
+}, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile', 'sheet behaviors are mobile only');
   await page.goto(`/movie/${filmId}`);
   await page.locator('.block').first().click();
-  await expect(page.locator('.panel')).toBeVisible();
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'expanded');
   await expect(page.locator('.handle span')).toBeVisible();
-  // Real touch tap, not a mouse click: the handle must close on a finger.
-  await page.touchscreen.tap(187, (await page.locator('.handle').boundingBox())!.y + 8);
-  await expect(page.locator('.panel')).toHaveCount(0);
-  await page.locator('.block').first().click();
-  await expect(page.locator('.panel')).toBeVisible();
+  // Real touch tap on the handle: docks, handle stays reachable.
+  const handle = (await page.locator('.handle').boundingBox())!;
+  await page.touchscreen.tap(handle.x + handle.width / 2, handle.y + 22);
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'docked');
+  await expect(page.locator('.handle span')).toBeVisible();
+  // Tapping the docked handle expands again, content intact with no refetch.
+  await page.waitForTimeout(250); // let the dock transition settle before measuring
+  const docked = (await page.locator('.handle').boundingBox())!;
+  await page.touchscreen.tap(docked.x + docked.width / 2, docked.y + 22);
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'expanded');
+  await expect(page.locator('.this-part')).toBeVisible();
+  // The backdrop docks too.
   await page.locator('.backdrop').click({ position: { x: 10, y: 10 } });
-  await expect(page.locator('.panel')).toHaveCount(0);
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'docked');
 });
 
 async function dragHandle(page: import('@playwright/test').Page, dy: number, settle: boolean) {
@@ -239,7 +248,7 @@ async function dragHandle(page: import('@playwright/test').Page, dy: number, set
   );
 }
 
-test('the sheet reopens after every kind of close', async ({ page }, testInfo) => {
+test('the sheet comes back from every kind of dock', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile', 'sheet behaviors are mobile only');
   await page.goto(`/movie/${filmId}`);
   const strip = page.locator('.scrubber');
@@ -249,22 +258,30 @@ test('the sheet reopens after every kind of close', async ({ page }, testInfo) =
     await strip.scrollIntoViewIfNeeded();
     const box = (await strip.boundingBox())!;
     await page.touchscreen.tap(box.x + box.width / 2, box.y + 10);
+    await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'expanded');
     await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
   };
-  // Close by handle tap, reopen.
+  const tapHandle = async () => {
+    await page.waitForTimeout(250); // sheet transitions run 150ms; measure settled
+    const handle = (await page.locator('.handle').boundingBox())!;
+    await page.touchscreen.tap(handle.x + handle.width / 2, handle.y + 22);
+  };
+  // Dock by handle tap, expand by handle tap.
   await openSheet();
-  const handle = (await page.locator('.handle').boundingBox())!;
-  await page.touchscreen.tap(handle.x + handle.width / 2, handle.y + 22);
-  await expect(page.locator('.panel')).toHaveCount(0);
-  await openSheet();
-  // Close by swipe, reopen.
+  await tapHandle();
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'docked');
+  await tapHandle();
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'expanded');
+  // Dock by swipe, expand from the strip.
   await dragHandle(page, 120, true);
-  await expect(page.locator('.panel')).toHaveCount(0);
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'docked');
   await openSheet();
-  // Close by backdrop, reopen.
+  // Dock by backdrop, drag the docked handle up to expand.
   await page.locator('.backdrop').click({ position: { x: 10, y: 10 } });
-  await expect(page.locator('.panel')).toHaveCount(0);
-  await openSheet();
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'docked');
+  await page.waitForTimeout(250);
+  await dragHandle(page, -80, true);
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'expanded');
 });
 
 test('a long drag dismisses the sheet, a short one springs back', async ({ page }, testInfo) => {
@@ -280,9 +297,10 @@ test('a long drag dismisses the sheet, a short one springs back', async ({ page 
   // 40px is under the threshold: it springs back and stays open.
   await expect(page.locator('.panel')).toBeVisible();
   await expect(page.locator('.panel')).not.toHaveClass(/dragging/);
-  // 120px crosses the threshold: dismissed.
+  // 120px crosses the threshold: docked, handle still there.
   await dragHandle(page, 120, true);
-  await expect(page.locator('.panel')).toHaveCount(0);
+  await expect(page.locator('.panel')).toHaveAttribute('data-sheet', 'docked');
+  await expect(page.locator('.handle span')).toBeVisible();
 });
 
 test('a seq deep link opens the panel on load', async ({ page }) => {
