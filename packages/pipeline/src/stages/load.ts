@@ -58,6 +58,8 @@ const MOVIES_COLUMNS = `
   genre_ids Array(UInt16)
 `;
 
+// The vector index makes semantic search sub-100ms where brute force takes
+// over a second at 3.8M rows; bf16 storage halves its memory on the server.
 const LINES_COLUMNS = `
   movie_id UInt32,
   seq UInt32,
@@ -65,7 +67,8 @@ const LINES_COLUMNS = `
   text String,
   text_norm String,
   vec Array(Float32),
-  INDEX idx_text_norm text_norm TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4
+  INDEX idx_text_norm text_norm TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4,
+  INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', 384, 'bf16', 16, 128) GRANULARITY 100000000
 `;
 
 // Analytics tables hold live data written by the app; they are created once
@@ -98,6 +101,7 @@ async function createTables(ch: ClickHouseClient): Promise<void> {
   });
   await ch.command({
     query: `CREATE TABLE IF NOT EXISTS lines (${LINES_COLUMNS}) ENGINE = MergeTree ORDER BY (movie_id, seq)`,
+    clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
   });
   await ch.command({ query: 'DROP TABLE IF EXISTS movies_staging' });
   await ch.command({ query: 'DROP TABLE IF EXISTS lines_staging' });
@@ -106,6 +110,7 @@ async function createTables(ch: ClickHouseClient): Promise<void> {
   });
   await ch.command({
     query: `CREATE TABLE lines_staging (${LINES_COLUMNS}) ENGINE = MergeTree ORDER BY (movie_id, seq)`,
+    clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
   });
 }
 
