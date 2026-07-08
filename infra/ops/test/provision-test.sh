@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export UNQUOTE_ENV_FILE=/dev/null
 # Exercise provision-netcup.sh against the mock API: the happy path in both
 # modes plus three failure paths. No real credentials, no network beyond
 # localhost. Run: infra/ops/test/provision-test.sh

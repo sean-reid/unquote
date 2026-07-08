@@ -153,9 +153,12 @@ step_preflight() {
   need jq "brew install jq"
   need curl "comes with macOS"
   need ssh-keygen "comes with macOS"
-  if [ -f "$REPO_ROOT/.env" ]; then
+  # Tests point this at a scratch file so real credentials never leak in.
+  ENV_FILE=${UNQUOTE_ENV_FILE:-$REPO_ROOT/.env}
+  if [ -f "$ENV_FILE" ]; then
     # shellcheck disable=SC1091
-    set -a && . "$REPO_ROOT/.env" && set +a
+    # shellcheck disable=SC1090
+    set -a && . "$ENV_FILE" && set +a
     # Defaults bound at the top of the script predate this load; re-resolve
     # every env-overridable value so .env entries actually take effect.
     API_BASE=${NETCUP_API_BASE:-$API_BASE}
