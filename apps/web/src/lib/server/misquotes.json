@@ -222,12 +222,6 @@
     "year": 1991
   },
   {
-    "popular": "No wire hangers!",
-    "actual": "No wire hangers, ever!",
-    "film": "Mommie Dearest",
-    "year": 1981
-  },
-  {
     "popular": "Houston, we've got a problem",
     "actual": "Houston, we have a problem.",
     "film": "Apollo 13",
@@ -253,27 +247,9 @@
   },
   {
     "popular": "No, I am your father",
-    "actual": "I am your father.",
+    "actual": "No, I am your father.",
     "film": "The Empire Strikes Back",
     "year": 1980
-  },
-  {
-    "popular": "Do or do not, there is no try",
-    "actual": "Try not. Do. Or do not. There is no try.",
-    "film": "The Empire Strikes Back",
-    "year": 1980
-  },
-  {
-    "popular": "Life finds a way",
-    "actual": "No, I'm simply saying that life finds a way.",
-    "film": "Jurassic Park",
-    "year": 1993
-  },
-  {
-    "popular": "Stop trying to make fetch happen",
-    "actual": "Gretchen, stop trying to make \"fetch\" happen. It's not going to happen.",
-    "film": "Mean Girls",
-    "year": 2004
   },
   {
     "popular": "You know what's cooler than a million dollars? A billion dollars",
@@ -310,12 +286,6 @@
     "actual": "I want to play a game.",
     "film": "Saw",
     "year": 2004
-  },
-  {
-    "popular": "Draw me like one of your French girls",
-    "actual": "Jack, I want you to draw me like one of your French girls. Wearing this.",
-    "film": "Titanic",
-    "year": 1997
   },
   {
     "popular": "Like tears in the rain",
