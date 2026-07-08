@@ -27,11 +27,21 @@
   let dragMoved = false;
 
   const shown = $derived<ExpandableNeighbor[]>(levels ? levels[level] : []);
-  const selectedSegment = $derived(
-    selectedSeq === null
-      ? null
-      : (data.segments.find((s) => s.startSeq <= selectedSeq! && selectedSeq! <= s.endSeq) ?? null),
-  );
+  // Windows overlap, so identity beats containment: an explicit idx wins, and
+  // deep links fall back to the container whose midpoint is nearest.
+  const selectedSegment = $derived.by(() => {
+    if (selectedIdx !== null) return data.segments.find((s) => s.idx === selectedIdx) ?? null;
+    if (selectedSeq === null) return null;
+    const containers = data.segments.filter(
+      (s) => s.startSeq <= selectedSeq! && selectedSeq! <= s.endSeq,
+    );
+    containers.sort(
+      (a, b) =>
+        Math.abs(a.startSeq + a.endSeq - 2 * selectedSeq!) -
+        Math.abs(b.startSeq + b.endSeq - 2 * selectedSeq!),
+    );
+    return containers[0] ?? null;
+  });
 
   /** The selected part's own text at the active level; none at movie width. */
   const sourceLines = $derived.by<string[]>(() => {
@@ -48,15 +58,19 @@
   const sourceShown = $derived(expanded ? sourceLines : sourceLines.slice(0, SOURCE_PREVIEW_LINES));
   const sourceCapped = $derived(expanded && sourceTotal > sourceLines.length);
 
-  async function select(seq: number) {
+  let selectedIdx = $state<number | null>(null);
+
+  async function select(seq: number, idx: number | null = null) {
     selectedSeq = seq;
+    selectedIdx = idx;
     loading = true;
     levels = null;
     expanded = false;
     expandedNeighbor = null;
     dragY = 0;
     try {
-      const response = await fetch(`/api/movie/${data.movie.id}/neighbors?seq=${seq}`);
+      const suffix = idx === null ? '' : `&segment=${idx}`;
+      const response = await fetch(`/api/movie/${data.movie.id}/neighbors?seq=${seq}${suffix}`);
       if (response.ok) levels = (await response.json()) as NeighborPayload;
     } finally {
       loading = false;
@@ -65,10 +79,49 @@
 
   function close() {
     selectedSeq = null;
+    selectedIdx = null;
     levels = null;
     expanded = false;
     expandedNeighbor = null;
     dragY = 0;
+  }
+
+  let provisionalIdx = $state<number | null>(null);
+  let scrubbing = false;
+
+  function segmentAtX(strip: HTMLElement, clientX: number) {
+    const box = strip.getBoundingClientRect();
+    const fraction = Math.min(Math.max((clientX - box.left) / box.width, 0), 0.9999);
+    const total = data.segments.reduce((sum, s) => sum + (s.endSeq - s.startSeq + 1), 0);
+    let acc = 0;
+    for (const segment of data.segments) {
+      acc += segment.endSeq - segment.startSeq + 1;
+      if (fraction < acc / total) return segment;
+    }
+    return data.segments[data.segments.length - 1]!;
+  }
+
+  function onScrubDown(event: PointerEvent) {
+    scrubbing = true;
+    provisionalIdx = segmentAtX(event.currentTarget as HTMLElement, event.clientX).idx;
+    try {
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic events in tests have no active pointer to capture.
+    }
+  }
+
+  function onScrubMove(event: PointerEvent) {
+    if (!scrubbing) return;
+    provisionalIdx = segmentAtX(event.currentTarget as HTMLElement, event.clientX).idx;
+  }
+
+  function onScrubUp(event: PointerEvent) {
+    if (!scrubbing) return;
+    scrubbing = false;
+    const segment = segmentAtX(event.currentTarget as HTMLElement, event.clientX);
+    provisionalIdx = null;
+    void select(segment.startSeq, segment.idx);
   }
 
   function neighborKey(n: { movieId: number; startSeq: number }): string {
@@ -103,21 +156,34 @@
   function onPointerUp() {
     if (!dragging) return;
     dragging = false;
-    if (dragY > 80) close();
-    else dragY = 0;
     dragFrom = null;
+    // iOS skips click synthesis for captured pointers, so the tap must be
+    // recognized here: a press that never really moved is a close.
+    if (dragY > 60 || !dragMoved) close();
+    else dragY = 0;
   }
 
-  function onHandleClick() {
-    // A drag that settled should not double as a tap.
-    if (!dragMoved) close();
-    dragMoved = false;
+  function onHandleClick(event: MouseEvent) {
+    // Pointer taps are handled in onPointerUp; this path serves the keyboard,
+    // whose synthetic clicks carry detail 0.
+    if (event.detail === 0) close();
   }
 
+  // SvelteKit reuses this component across client-side navigations between
+  // films, so selection state must reset whenever the film (or deep-linked
+  // seq) changes; otherwise the panel keeps showing the previous film's part.
+  let navKey = '';
   $effect(() => {
-    if (data.initialSeq !== null && selectedSeq === null) {
-      void select(data.initialSeq);
-    }
+    const next = `${data.movie.id}:${data.initialSeq}`;
+    if (navKey === next) return;
+    navKey = next;
+    selectedSeq = null;
+    selectedIdx = null;
+    levels = null;
+    expanded = false;
+    expandedNeighbor = null;
+    dragY = 0;
+    if (data.initialSeq !== null) void select(data.initialSeq);
   });
 
   function posterUrl(path: string | null, size = 'w92'): string | null {
@@ -176,17 +242,33 @@
   {#if data.segments.length > 0}
     <section aria-label="The film as a timeline of moments">
       <h2>What does this part remind you of?</h2>
-      <div class="scrubber" role="tablist" aria-label="Moments of the film">
+      <div
+        class="scrubber"
+        role="tablist"
+        tabindex={-1}
+        aria-label="Moments of the film"
+        onpointerdown={onScrubDown}
+        onpointermove={onScrubMove}
+        onpointerup={onScrubUp}
+        onpointercancel={() => {
+          scrubbing = false;
+          provisionalIdx = null;
+        }}
+      >
         {#each data.segments as segment (segment.idx)}
           <button
             role="tab"
             aria-selected={selectedSegment?.idx === segment.idx}
             aria-label="Moment {pct(segment.arc)} through"
+            data-idx={segment.idx}
+            data-start={segment.startSeq}
             class="block"
-            class:active={selectedSegment?.idx === segment.idx}
+            class:active={provisionalIdx === null
+              ? selectedSegment?.idx === segment.idx
+              : provisionalIdx === segment.idx}
             style:flex-grow={segment.endSeq - segment.startSeq + 1}
             title="{pct(segment.arc)} through"
-            onclick={() => select(segment.startSeq)}
+            onclick={(e) => e.detail === 0 && select(segment.startSeq, segment.idx)}
           ></button>
         {/each}
       </div>
@@ -471,6 +553,8 @@
     display: flex;
     gap: 2px;
     height: 44px;
+    /* The strip owns horizontal presses; vertical swipes still scroll. */
+    touch-action: pan-y;
   }
 
   .block {
@@ -791,12 +875,16 @@
     }
 
     .handle {
-      display: block;
       position: sticky;
       top: 0;
       background: var(--surface);
       z-index: 1;
       touch-action: none;
+      /* A finger needs something to snag: a full 44px strip, bar centered. */
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
     .neighbor-row .sub-line:nth-of-type(n + 4) {

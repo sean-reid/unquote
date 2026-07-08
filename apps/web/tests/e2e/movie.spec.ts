@@ -95,6 +95,77 @@ test('the selected part shows at each width', async ({ page }) => {
   await expect(page.locator('.this-part')).toHaveCount(0);
 });
 
+test('the far edge of the strip selects the last part', async ({ page }) => {
+  await page.goto(`/movie/${filmId}`);
+  const strip = page.locator('.scrubber');
+  await expect(strip).toBeVisible();
+  const box = (await strip.boundingBox())!;
+  const lastIdx = await page.locator('.block').last().getAttribute('data-idx');
+  const lastStart = await page.locator('.block').last().getAttribute('data-start');
+  const requested: string[] = [];
+  await page.route('**/api/movie/*/neighbors*', async (route) => {
+    requested.push(route.request().url());
+    await route.continue();
+  });
+  // A press at the strip's right edge must land on the final part, however
+  // narrow its block renders.
+  await strip.dispatchEvent('pointerdown', { clientX: box.x + box.width - 1, clientY: box.y + 5 });
+  await strip.dispatchEvent('pointerup', { clientX: box.x + box.width - 1, clientY: box.y + 5 });
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  expect(requested[0]).toContain(`segment=${lastIdx}`);
+  expect(requested[0]).toContain(`seq=${lastStart}`);
+  await expect(page.locator('.block').last()).toHaveAttribute('aria-selected', 'true');
+});
+
+test('a middle block resolves to its own part, not its overlapping neighbor', async ({ page }) => {
+  await page.goto(`/movie/${filmId}`);
+  const blocks = page.locator('.block');
+  const count = await blocks.count();
+  test.skip(count < 3, 'needs at least three parts');
+  const mid = blocks.nth(Math.floor(count / 2));
+  const idx = await mid.getAttribute('data-idx');
+  const requested: string[] = [];
+  await page.route('**/api/movie/*/neighbors*', async (route) => {
+    requested.push(route.request().url());
+    await route.continue();
+  });
+  const box = (await mid.boundingBox())!;
+  await page.locator('.scrubber').dispatchEvent('pointerdown', {
+    clientX: box.x + box.width / 2,
+    clientY: box.y + 5,
+  });
+  await page.locator('.scrubber').dispatchEvent('pointerup', {
+    clientX: box.x + box.width / 2,
+    clientY: box.y + 5,
+  });
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  expect(requested[0]).toContain(`segment=${idx}`);
+  await expect(mid).toHaveAttribute('aria-selected', 'true');
+});
+
+test('opening in another film shows that film, not the last one', async ({ page }) => {
+  const calls: string[] = [];
+  await page.route('**/api/movie/*/neighbors*', async (route) => {
+    calls.push(route.request().url());
+    await route.continue();
+  });
+  await page.goto(`/movie/${filmId}`);
+  await page.locator('.block').first().click();
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  const firstTitle = await page.locator('h1').textContent();
+  const firstPart = await page.locator('.this-part').textContent();
+  const first = page.locator('.neighbor').first();
+  await first.locator('.neighbor-row').click();
+  await first.locator('.open-film').click();
+  await expect(page).toHaveURL(/\/movie\/\d+\?seq=\d+/);
+  await expect(page.locator('h1')).not.toHaveText(firstTitle ?? '');
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  // The panel's subject belongs to the new film's request, not the old state.
+  expect(calls.length).toBe(2);
+  expect(calls[1]).not.toContain(`/movie/${filmId}/`);
+  await expect(page.locator('.this-part')).not.toHaveText(firstPart ?? '');
+});
+
 test('a neighbor card previews in place, then opens in the film', async ({ page }) => {
   await page.goto(`/movie/${filmId}`);
   await page.locator('.block').first().click();
