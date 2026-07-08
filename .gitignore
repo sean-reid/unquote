@@ -27,3 +27,5 @@ packages/pipeline/data/
 .DS_Store
 venv/
 .venv/
+infra/ops/deploy_key
+infra/ops/deploy_key.pub
