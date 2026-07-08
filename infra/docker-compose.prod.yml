@@ -7,7 +7,7 @@ name: unquote-prod
 
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:25.8
+    image: clickhouse/clickhouse-server:26.3
     restart: always
     environment:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_ADMIN_PASSWORD:?set in infra/.env}

@@ -1,6 +1,6 @@
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:25.8
+    image: clickhouse/clickhouse-server:26.3
     container_name: unquote-clickhouse
     restart: unless-stopped
     ports:
