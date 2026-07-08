@@ -17,13 +17,7 @@ import { parseArgs } from 'node:util';
 import { DATA_DIR } from '../config.js';
 import { readJson, writeJson, writeJsonl } from '../util/fs.js';
 import { log } from '../util/log.js';
-import {
-  OsClient,
-  QuotaExhausted,
-  mergeQueue,
-  pickBest,
-  type QueueEntry,
-} from '../util/opensubtitles.js';
+import { OsClient, mergeQueue, upgradeFilm, type QueueEntry } from '../util/opensubtitles.js';
 import { scoreFilm } from '../util/quality.js';
 import { srtToCues } from '../util/srt.js';
 import type { MovieRecord } from '../types.js';
@@ -80,42 +74,15 @@ log.step(
 for (const entry of runnable) {
   if (budget <= 0) break;
   const movie = byId.get(entry.movieId)!;
-  entry.attempts += 1;
-  try {
-    const candidates = await client.search(movie.id);
-    const best = pickBest(candidates, movie.year);
-    if (!best) {
-      entry.status = 'no-match';
-      entry.reason = `no plausible english subtitle among ${candidates.length}`;
-      await writeJson(QUEUE_PATH, queue);
-      continue;
-    }
-    const alreadyCached = (await client.cachedSubtitle(best.fileId)) !== null;
-    const path = await client.download(best.fileId);
-    if (!alreadyCached) budget -= 1;
-    const cues = srtToCues(await readFile(path, 'utf8'));
-    if (cues.length < MIN_CUES) {
-      entry.status = 'parked';
-      entry.reason = `too few cues (${cues.length})`;
-    } else {
-      entry.status = 'done';
-      entry.fileId = best.fileId;
-      entry.cues = cues.length;
-      entry.reason = undefined;
-      log.info(`upgraded ${movie.title} (${movie.year}): ${cues.length} cues, file ${best.fileId}`);
-    }
-  } catch (error) {
-    if (error instanceof QuotaExhausted) {
-      budget = 0;
-      entry.attempts -= 1;
-      log.warn(error.message);
-    } else {
-      entry.status = 'parked';
-      entry.reason = error instanceof Error ? error.message : String(error);
-      log.warn(`parked ${movie.title}: ${entry.reason}`);
-    }
-  }
+  const outcome = await upgradeFilm(entry, movie, {
+    client,
+    toCues: srtToCues,
+    minCues: MIN_CUES,
+    read: (path) => readFile(path, 'utf8'),
+  });
+  if (outcome.spent) budget -= 1;
   await writeJson(QUEUE_PATH, queue);
+  if (outcome.stop) break;
 }
 
 // Regenerate the replace layer from everything finished so far. Deterministic

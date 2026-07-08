@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { OsClient, mergeQueue, pickBest, type QueueEntry } from '../src/util/opensubtitles.js';
+import {
+  NetworkDisabled,
+  OsClient,
+  QuotaExhausted,
+  mergeQueue,
+  pickBest,
+  upgradeFilm,
+  type QueueEntry,
+  type UpgradeDeps,
+} from '../src/util/opensubtitles.js';
 import { srtToCues } from '../src/util/srt.js';
 
 describe('srtToCues', () => {
@@ -127,6 +136,100 @@ describe('OsClient request discipline', () => {
     );
     client.remaining = 0;
     await expect(client.download(1234)).rejects.toThrow(/quota exhausted/);
+  });
+});
+
+describe('upgradeFilm outcomes', () => {
+  const movie = { id: 603, year: 1999, title: 'The Matrix' };
+  const fresh = (): QueueEntry => ({
+    movieId: 603,
+    title: 'The Matrix',
+    status: 'pending',
+    attempts: 0,
+  });
+  const deps = (client: UpgradeDeps['client']): UpgradeDeps => ({
+    client,
+    toCues: srtToCues,
+    minCues: 1,
+    read: async () => '1\n00:00:01,000 --> 00:00:02,000\nHello there.\n',
+  });
+
+  it('parks a film when the search transport fails, keeping it queued', async () => {
+    const entry = fresh();
+    const outcome = await upgradeFilm(
+      entry,
+      movie,
+      deps({
+        search: async () => {
+          throw new TypeError('fetch failed');
+        },
+        cachedSubtitle: async () => null,
+        download: async () => '',
+      }),
+    );
+    expect(entry.status).toBe('parked');
+    expect(entry.attempts).toBe(1);
+    expect(outcome.stop).toBe(false);
+  });
+
+  it('stops the run without charging an attempt when the network is disabled', async () => {
+    const entry = fresh();
+    const outcome = await upgradeFilm(
+      entry,
+      movie,
+      deps({
+        search: async () => {
+          throw new NetworkDisabled();
+        },
+        cachedSubtitle: async () => null,
+        download: async () => '',
+      }),
+    );
+    expect(entry.status).toBe('pending');
+    expect(entry.attempts).toBe(0);
+    expect(outcome.stop).toBe(true);
+  });
+
+  it('stops the run when the quota runs out mid-film', async () => {
+    const entry = fresh();
+    const outcome = await upgradeFilm(
+      entry,
+      movie,
+      deps({
+        search: async () => [
+          {
+            fileId: 9,
+            fileName: 'a.srt',
+            downloadCount: 10,
+            hearingImpaired: false,
+            fromTrusted: false,
+            year: 1999,
+          },
+        ],
+        cachedSubtitle: async () => null,
+        download: async () => {
+          throw new QuotaExhausted(null);
+        },
+      }),
+    );
+    expect(entry.status).toBe('pending');
+    expect(entry.attempts).toBe(0);
+    expect(outcome.stop).toBe(true);
+  });
+
+  it('marks no-match only for a genuinely empty search result', async () => {
+    const entry = fresh();
+    const outcome = await upgradeFilm(
+      entry,
+      movie,
+      deps({
+        search: async () => [],
+        cachedSubtitle: async () => null,
+        download: async () => '',
+      }),
+    );
+    expect(entry.status).toBe('no-match');
+    expect(outcome.stop).toBe(false);
   });
 });
 

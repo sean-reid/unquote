@@ -37,6 +37,13 @@ export class QuotaExhausted extends Error {
   }
 }
 
+/** Raised on any cache miss while ALLOW_NETWORK is unset: nothing was tried. */
+export class NetworkDisabled extends Error {
+  constructor() {
+    super('network disabled (set ALLOW_NETWORK=1)');
+  }
+}
+
 interface RawSearch {
   data: Array<{
     attributes: {
@@ -114,10 +121,8 @@ export class OsClient {
     try {
       raw = JSON.parse(await readFile(cachePath, 'utf8')) as RawSearch;
     } catch {
-      if (!NETWORK_ALLOWED) {
-        log.warn(`opensubtitles cache miss (network disabled): tmdb ${tmdbId}`);
-        return [];
-      }
+      // An offline cache miss must not read as "no subtitles exist".
+      if (!NETWORK_ALLOWED) throw new NetworkDisabled();
       const url = `${API}/subtitles?tmdb_id=${tmdbId}&languages=en&order_by=download_count&order_direction=desc`;
       const response = await this.request(url);
       if (!response.ok) throw new Error(`search failed for tmdb ${tmdbId}: ${response.status}`);
@@ -159,7 +164,7 @@ export class OsClient {
     if (this.remaining !== null && this.remaining <= 0) {
       throw new QuotaExhausted(this.resetTime);
     }
-    if (!NETWORK_ALLOWED) throw new Error('network disabled (set ALLOW_NETWORK=1)');
+    if (!NETWORK_ALLOWED) throw new NetworkDisabled();
 
     const response = await this.request(`${API}/download`, {
       method: 'POST',
@@ -209,6 +214,61 @@ export function mergeQueue(
     }
   }
   return [...byId.values()];
+}
+
+export interface UpgradeDeps {
+  client: Pick<OsClient, 'search' | 'download' | 'cachedSubtitle'>;
+  toCues: (srt: string) => string[];
+  minCues: number;
+  read: (path: string) => Promise<string>;
+}
+
+/**
+ * Try one queued film and record the outcome on its entry. Only a searched
+ * film with no plausible subtitle is no-match, a permanent verdict; a
+ * transport failure parks the film so a later run retries it, and quota or
+ * network exhaustion stops the whole run without charging the film an
+ * attempt, since nothing was really tried.
+ */
+export async function upgradeFilm(
+  entry: QueueEntry,
+  movie: { id: number; year: number; title: string },
+  deps: UpgradeDeps,
+): Promise<{ spent: boolean; stop: boolean }> {
+  entry.attempts += 1;
+  try {
+    const candidates = await deps.client.search(movie.id);
+    const best = pickBest(candidates, movie.year);
+    if (!best) {
+      entry.status = 'no-match';
+      entry.reason = `no plausible english subtitle among ${candidates.length}`;
+      return { spent: false, stop: false };
+    }
+    const alreadyCached = (await deps.client.cachedSubtitle(best.fileId)) !== null;
+    const path = await deps.client.download(best.fileId);
+    const cues = deps.toCues(await deps.read(path));
+    if (cues.length < deps.minCues) {
+      entry.status = 'parked';
+      entry.reason = `too few cues (${cues.length})`;
+    } else {
+      entry.status = 'done';
+      entry.fileId = best.fileId;
+      entry.cues = cues.length;
+      entry.reason = undefined;
+      log.info(`upgraded ${movie.title} (${movie.year}): ${cues.length} cues, file ${best.fileId}`);
+    }
+    return { spent: !alreadyCached, stop: false };
+  } catch (error) {
+    if (error instanceof QuotaExhausted || error instanceof NetworkDisabled) {
+      entry.attempts -= 1;
+      log.warn(error.message);
+      return { spent: false, stop: true };
+    }
+    entry.status = 'parked';
+    entry.reason = error instanceof Error ? error.message : String(error);
+    log.warn(`parked ${movie.title}: ${entry.reason}`);
+    return { spent: false, stop: false };
+  }
 }
 
 /**
