@@ -3,3 +3,4 @@ export * from './types.js';
 export * from './embedding.js';
 export * from './search.js';
 export * from './diff.js';
+export * from './ladder.js';
