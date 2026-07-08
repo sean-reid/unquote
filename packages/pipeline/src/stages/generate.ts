@@ -46,6 +46,7 @@ const { values: args } = parseArgs({
     movies: { type: 'string' },
     limit: { type: 'string' },
     windows: { type: 'string' },
+    model: { type: 'string', default: 'sonnet' },
   },
 });
 const kind = args.kind;
@@ -124,7 +125,7 @@ function runClaude(prompt: string): Promise<string> {
   return new Promise((res, rej) => {
     const child = execFile(
       'claude',
-      ['-p', '--output-format', 'json'],
+      ['-p', '--output-format', 'json', '--model', args.model!],
       { maxBuffer: 64 * 1024 * 1024, timeout: CLAUDE_TIMEOUT_MS },
       (err, stdout) => (err ? rej(err) : res(stdout)),
     );
@@ -135,7 +136,7 @@ function runClaude(prompt: string): Promise<string> {
 interface Envelope {
   is_error?: boolean;
   result?: string;
-  modelUsage?: Record<string, unknown>;
+  modelUsage?: Record<string, { outputTokens?: number }>;
 }
 
 async function invoke(payload: unknown): Promise<{ reply: string; model: string }> {
@@ -146,7 +147,12 @@ async function invoke(payload: unknown): Promise<{ reply: string; model: string 
   if (envelope.is_error || typeof envelope.result !== 'string') {
     throw new Error(`claude returned an error envelope: ${stdout.slice(0, 300)}`);
   }
-  return { reply: envelope.result, model: Object.keys(envelope.modelUsage ?? {})[0] ?? 'claude' };
+  // modelUsage also lists auxiliary models; the one that wrote the reply is
+  // the one with the output tokens.
+  const model = Object.entries(envelope.modelUsage ?? {}).sort(
+    (a, b) => (b[1].outputTokens ?? 0) - (a[1].outputTokens ?? 0),
+  )[0]?.[0];
+  return { reply: envelope.result, model: model ?? args.model! };
 }
 
 interface PendingFilm {
@@ -194,6 +200,7 @@ log.step(`${kind} v${promptVersion}: ${pending.length} films to run, ${skipped} 
 let verbatim = 0;
 let snapped = 0;
 let dropped = 0;
+let unanswered = 0;
 let lintFailed = 0;
 
 for (let at = 0; at < pending.length; at += BATCH) {
@@ -208,14 +215,17 @@ for (let at = 0; at < pending.length; at += BATCH) {
       lines: slate(f.lines).map((u) => ({ seq: u.seq, text: u.text })),
     }));
     const { reply, model } = await invoke(payload);
-    const parsed = extractJson<Array<{ movieId: number; quotes: Array<{ text: string }> }>>(reply);
+    const parsed =
+      extractJson<Array<{ movieId: number; quotes: Array<{ seq?: number | null; text: string }> }>>(
+        reply,
+      );
     for (const film of batch) {
       const answer = parsed.find((p) => p.movieId === film.movieId);
       const matcher = new FilmMatcher(film.lines);
       const quotes: unknown[] = [];
       const misses: string[] = [];
       for (const q of answer?.quotes ?? []) {
-        const m = matcher.match(q.text);
+        const m = matcher.match(q.text, q.seq);
         if (m?.verbatim) {
           verbatim += 1;
           quotes.push({ seq: m.line.seq, arc: m.line.arc, text: m.line.text, source: 'verbatim' });
@@ -233,6 +243,14 @@ for (let at = 0; at < pending.length; at += BATCH) {
           dropped += 1;
           misses.push(q.text);
         }
+      }
+      // A film the model skipped, or whose picks all failed validation, must
+      // not be keyed as done: leaving it out of the store makes the next run
+      // retry it instead of shipping an empty entry forever.
+      if (quotes.length === 0) {
+        unanswered += 1;
+        log.warn(`movie ${film.movieId}: no quotes survived, will retry next run`);
+        continue;
       }
       rows.push({
         movieId: film.movieId,
@@ -308,7 +326,9 @@ for (let at = 0; at < pending.length; at += BATCH) {
 }
 
 if (kind === 'five-quotes') {
-  log.step(`done: ${verbatim} verbatim, ${snapped} snapped, ${dropped} dropped`);
+  log.step(
+    `done: ${verbatim} verbatim, ${snapped} snapped, ${dropped} dropped, ${unanswered} films left for retry`,
+  );
 } else {
   log.step(`done: ${lintFailed} of the generated summaries failed lint`);
 }

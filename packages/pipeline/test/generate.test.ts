@@ -47,6 +47,22 @@ describe('FilmMatcher', () => {
     const m = matcher.match('Here is looking at you, kid');
     expect(m === null || m.score < 0.55).toBe(true);
   });
+
+  it('resolves a repeated line to the hinted occurrence', () => {
+    const repeated = new FilmMatcher([
+      line(5, 'My name is Inigo Montoya.'),
+      line(6, 'Stop saying that!'),
+      line(80, 'My name is Inigo Montoya.'),
+    ]);
+    expect(repeated.match('My name is Inigo Montoya.')?.line.seq).toBe(5);
+    expect(repeated.match('My name is Inigo Montoya.', 80)?.line.seq).toBe(80);
+  });
+
+  it('ignores a seq hint whose text does not agree', () => {
+    const m = matcher.match('May the Force be with you.', 0);
+    expect(m?.verbatim).toBe(true);
+    expect(m?.line.seq).toBe(2);
+  });
 });
 
 describe('lintSummary', () => {

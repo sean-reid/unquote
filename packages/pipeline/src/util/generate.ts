@@ -35,6 +35,7 @@ export interface SnapResult {
  */
 export class FilmMatcher {
   private byNorm = new Map<string, Utterance>();
+  private bySeq = new Map<number, Utterance>();
   private df = new Map<string, number>();
   private vectors: Array<Map<string, number>> = [];
 
@@ -42,6 +43,7 @@ export class FilmMatcher {
     for (const line of lines) {
       const norm = normalizeQuote(line.text);
       if (norm && !this.byNorm.has(norm)) this.byNorm.set(norm, line);
+      this.bySeq.set(line.seq, line);
     }
     for (const line of lines) {
       for (const token of new Set(tokenize(line.text))) {
@@ -70,8 +72,16 @@ export class FilmMatcher {
     return vec;
   }
 
-  match(quote: string): SnapResult | null {
+  match(quote: string, seqHint?: number | null): SnapResult | null {
     const norm = normalizeQuote(quote);
+    // A repeated line lives at several seqs; when the model named one and the
+    // text there agrees, that occurrence wins over the first one found.
+    if (seqHint != null) {
+      const hinted = this.bySeq.get(seqHint);
+      if (hinted && normalizeQuote(hinted.text) === norm) {
+        return { line: hinted, score: 1, verbatim: true };
+      }
+    }
     const exact = this.byNorm.get(norm);
     if (exact) return { line: exact, score: 1, verbatim: true };
 
