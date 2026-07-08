@@ -19,6 +19,8 @@ export interface SearchHit {
   occurrences: number;
   /** True when this hit looks like what the user was trying to remember, a few words off. */
   nearMiss?: boolean;
+  /** True when this hit is an exchange-width moment, not a single spoken line. */
+  moment?: boolean;
 }
 
 /** A curated famous misquote matched against the query. */

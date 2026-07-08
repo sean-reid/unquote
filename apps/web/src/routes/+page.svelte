@@ -164,7 +164,13 @@
                 <span class="poster-blank"></span>
               {/if}
               <div>
-                {#if hit.nearMiss}
+                {#if hit.moment}
+                  <ul class="exchange">
+                    {#each hit.text.split('\n') as spoken, i (i)}
+                      <li class:trail={spoken === '\u2026'}>{spoken}</li>
+                    {/each}
+                  </ul>
+                {:else if hit.nearMiss}
                   <p class="remembering">You might be remembering:</p>
                   <blockquote>
                     {#each alignWords(query, hit.text) as part, i (i)}{i > 0
@@ -184,6 +190,9 @@
                   >
                     {arcLabel(hit.arc)}
                   </span>
+                  {#if hit.moment}
+                    <span class="arc">moment</span>
+                  {/if}
                   {#if hit.occurrences > 1}
                     <span class="arc">said {hit.occurrences} times</span>
                   {/if}
@@ -455,6 +464,34 @@
 
   blockquote::after {
     content: close-quote;
+  }
+
+  .exchange {
+    list-style: none;
+    margin: 0 0 var(--space-2);
+    padding: 0;
+    font-family: var(--font-quote);
+    font-size: 1.05rem;
+  }
+
+  .exchange li {
+    padding-left: 1.1em;
+    position: relative;
+  }
+
+  .exchange li::before {
+    content: '\2013';
+    position: absolute;
+    left: 0;
+    color: var(--text-muted);
+  }
+
+  .exchange li.trail {
+    color: var(--text-muted);
+  }
+
+  .exchange li.trail::before {
+    content: '';
   }
 
   .meta {

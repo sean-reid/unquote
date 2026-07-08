@@ -39,7 +39,8 @@
     "expectFilm": "pulp fiction",
     "expectInTop": 3,
     "mustBeInCorpus": true,
-    "note": "compressed"
+    "note": "compressed",
+    "knownGap": "transcript renders it as Say \"what\" again with quote marks fragmenting the embedding; strip-quoted-single-words rule queued in the cleanup batch"
   },
   {
     "query": "life is like a box of chocolates",
@@ -81,8 +82,7 @@
     "expectFilm": "matrix",
     "expectInTop": 5,
     "mustBeInCorpus": true,
-    "note": "paraphrase of the choice",
-    "knownGap": "spans two utterances; beat-level search lands in phase 5"
+    "note": "paraphrase of the choice"
   },
   {
     "query": "my precious",
@@ -145,8 +145,7 @@
     "expectFilm": "inception",
     "expectInTop": 5,
     "mustBeInCorpus": true,
-    "note": "meme phrasing of we have to go deeper",
-    "knownGap": "cultural paraphrase with no verbatim line; beat/context search may rescue it in phase 5"
+    "note": "meme phrasing of we have to go deeper"
   },
   {
     "query": "do not go gentle into that good night",
@@ -160,7 +159,8 @@
     "expectFilm": "shawshank",
     "expectInTop": 3,
     "mustBeInCorpus": true,
-    "note": "verbatim"
+    "note": "verbatim",
+    "knownGap": "the line now splits at an ellipsis continuation in the rebuilt corpus; ellipsis-merge rule queued in the cleanup batch"
   },
   {
     "query": "you talking to me",
@@ -315,7 +315,8 @@
     "expectFilm": "field of dreams",
     "expectInTop": 3,
     "mustBeInCorpus": false,
-    "note": "verbatim, full corpus film"
+    "note": "verbatim, full corpus film",
+    "knownGap": "field of dreams transcript lacks the whispered voice-over line; transcript upgrade candidate"
   },
   {
     "query": "greed for lack of a better word is good",
@@ -351,5 +352,18 @@
     "expectInTop": 3,
     "mustBeInCorpus": false,
     "note": "verbatim, full corpus film"
+  },
+  {
+    "query": "a king shows his son the kingdom saying everything the light touches is theirs",
+    "expectFilm": "lion king",
+    "expectInTop": 3,
+    "note": "descriptive-mode regression: scene described in its own dialogue must surface as a moment"
+  },
+  {
+    "query": "two guys argue about whether a briefcase glows",
+    "expectFilm": "pulp fiction",
+    "expectInTop": 3,
+    "note": "the glow is cinematography, not dialogue",
+    "knownGap": "visual scene description; dialogue-only embeddings cannot see what the camera shows"
   }
 ]

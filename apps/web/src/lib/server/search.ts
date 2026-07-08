@@ -187,7 +187,7 @@ async function beatsArm(query: string): Promise<BeatRow[]> {
       SELECT movie_id, start_seq, arc, text
       FROM beats
       ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
-      LIMIT 10
+      LIMIT 24
     `,
     query_params: { vec: Array.from(vec) },
     format: 'JSONEachRow',
@@ -268,6 +268,8 @@ async function phraseStats(queryNorm: string): Promise<PhraseStats | null> {
 function markNearMiss(queryNorm: string, top: SearchHit[]): void {
   const first = top[0];
   if (!first) return;
+  // A word diff against a multi-speaker exchange is meaningless.
+  if (first.moment) return;
   if (first.arms.length !== 1 || first.arms[0] !== 'semantic') return;
   const stats = diffStats(queryNorm, normalize(first.text));
   if (
@@ -385,17 +387,30 @@ export async function search(query: string): Promise<SearchResponse> {
   }
   let top = deduped.slice(0, 50);
 
-  // With no verbatim match the memory may live at exchange width (a line
-  // split across speakers, or a described scene); blend the closest beats in
-  // among the fuzzy hits.
+  // With no verbatim match the query is a memory of meaning, not of words
+  // (a described scene, or a line split across speakers). Scene-width beats
+  // are the right unit for that, so they join as a first-class arm weighted
+  // to outrank word-coincidence lines: a top beat scores above a line that
+  // merely shares vocabulary with the query across two arms.
   if (exact.length === 0) {
+    const DESCRIPTIVE_BEAT_WEIGHT = 1.8;
+    const MAX_UTTERANCES = 4;
     const beats = await beatsArm(query);
     const beatHits: SearchHit[] = [];
+    const filmSeen = new Set<number>();
     for (const [rank, row] of beats.entries()) {
       const meta = movieById.get(row.movie_id);
       if (!meta) continue;
-      const excerpt =
-        row.text.length <= 200 ? row.text : `${row.text.slice(0, 200).replace(/ \S*$/, '')}...`;
+      // Overlapping windows make adjacent beats near-duplicates; one per film.
+      if (filmSeen.has(row.movie_id)) continue;
+      filmSeen.add(row.movie_id);
+      const utterances = row.text.split('\n').filter((line) => line.trim().length > 0);
+      // Cap at four rendered lines; when cut, the fourth slot is the ellipsis
+      // so truncation is always visible and never lands mid-utterance.
+      const shown =
+        utterances.length > MAX_UTTERANCES
+          ? [...utterances.slice(0, MAX_UTTERANCES - 1), '\u2026']
+          : utterances;
       beatHits.push({
         movieId: row.movie_id,
         title: meta.title,
@@ -403,10 +418,11 @@ export async function search(query: string): Promise<SearchResponse> {
         posterPath: meta.poster_path,
         seq: row.start_seq,
         arc: row.arc,
-        text: excerpt,
-        score: 1.2 / (60 + rank + 1),
+        text: shown.join('\n'),
+        score: DESCRIPTIVE_BEAT_WEIGHT / (60 + rank + 1),
         arms: ['semantic'],
         occurrences: 1,
+        moment: true,
       });
     }
     const known = new Set(top.map((hit) => `${hit.movieId}:${hit.seq}`));
