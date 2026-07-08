@@ -42,26 +42,21 @@ test('a movie page shows five lines and the timeline', async ({ page }, testInfo
   await page.goto(`/movie/${filmId}`);
   await expect(page.locator('h1')).toBeVisible();
   await expect(page.locator('.five-line')).toHaveCount(5);
-  const isMobile = testInfo.project.name === 'mobile';
-  await expect(page.locator(isMobile ? '.chapter' : '.block').first()).toBeVisible();
+  await expect(page.locator('.block').first()).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath(`movie-${testInfo.project.name}.png`),
     fullPage: true,
   });
 });
 
-test('the dial switches width without another request', async ({ page }, testInfo) => {
+test('the dial switches width without another request', async ({ page }) => {
   let neighborCalls = 0;
   await page.route('**/api/movie/*/neighbors*', async (route) => {
     neighborCalls += 1;
     await route.continue();
   });
   await page.goto(`/movie/${filmId}`);
-  const isMobile = testInfo.project.name === 'mobile';
-  await page
-    .locator(isMobile ? '.chapter' : '.block')
-    .first()
-    .click();
+  await page.locator('.block').first().click();
   await expect(page.locator('.dial')).toBeVisible();
   await expect(page.locator('.neighbor').first()).toBeVisible();
   for (const label of ['Exact line', 'Scene', 'Whole movie', 'Exchange']) {
@@ -69,6 +64,116 @@ test('the dial switches width without another request', async ({ page }, testInf
   }
   await expect(page.locator('.panel')).toBeVisible();
   expect(neighborCalls).toBe(1);
+});
+
+test('the dial never wraps', async ({ page }) => {
+  await page.goto(`/movie/${filmId}`);
+  await page.locator('.block').first().click();
+  await expect(page.locator('.dial')).toBeVisible();
+  const tops = await page
+    .locator('.dial button')
+    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
+  expect(new Set(tops.map((t) => Math.round(t))).size).toBe(1);
+});
+
+test('the selected part shows at each width', async ({ page }) => {
+  await page.goto(`/movie/${filmId}`);
+  await page.locator('.block').first().click();
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  // Exchange is the default width: the part is the whole exchange.
+  await expect(page.locator('.this-part .sub-line').first()).toBeVisible();
+  await page.getByRole('radio', { name: 'Exact line' }).click();
+  await expect(page.locator('.this-part .sub-line')).toHaveCount(1);
+  await page.getByRole('radio', { name: 'Scene' }).click();
+  const compact = await page.locator('.this-part .sub-line').count();
+  const expander = page.locator('.expander');
+  if (await expander.count()) {
+    await expander.click();
+    expect(await page.locator('.this-part .sub-line').count()).toBeGreaterThan(compact);
+  }
+  await page.getByRole('radio', { name: 'Whole movie' }).click();
+  await expect(page.locator('.this-part')).toHaveCount(0);
+});
+
+test('a neighbor card previews in place, then opens in the film', async ({ page }) => {
+  await page.goto(`/movie/${filmId}`);
+  await page.locator('.block').first().click();
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  const url = page.url();
+  const first = page.locator('.neighbor').first();
+  await first.locator('.neighbor-row').click();
+  await expect(first.locator('.neighbor-row')).toHaveAttribute('aria-expanded', 'true');
+  await expect(first.locator('.neighbor-more .sub-line').first()).toBeVisible();
+  expect(page.url()).toBe(url); // preview does not navigate
+  // Only one preview at a time.
+  const second = page.locator('.neighbor').nth(1);
+  await second.locator('.neighbor-row').click();
+  await expect(first.locator('.neighbor-row')).toHaveAttribute('aria-expanded', 'false');
+  await expect(second.locator('.neighbor-row')).toHaveAttribute('aria-expanded', 'true');
+  // Second tap collapses.
+  await second.locator('.neighbor-row').click();
+  await expect(second.locator('.neighbor-row')).toHaveAttribute('aria-expanded', 'false');
+  // Open in film navigates.
+  await first.locator('.neighbor-row').click();
+  await first.locator('.open-film').click();
+  await expect(page).toHaveURL(/\/movie\/\d+\?seq=\d+/);
+});
+
+test('the sheet closes from the handle and the backdrop', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'sheet behaviors are mobile only');
+  await page.goto(`/movie/${filmId}`);
+  await page.locator('.block').first().click();
+  await expect(page.locator('.panel')).toBeVisible();
+  await expect(page.locator('.handle span')).toBeVisible();
+  // Real touch tap, not a mouse click: the handle must close on a finger.
+  await page.touchscreen.tap(187, (await page.locator('.handle').boundingBox())!.y + 8);
+  await expect(page.locator('.panel')).toHaveCount(0);
+  await page.locator('.block').first().click();
+  await expect(page.locator('.panel')).toBeVisible();
+  await page.locator('.backdrop').click({ position: { x: 10, y: 10 } });
+  await expect(page.locator('.panel')).toHaveCount(0);
+});
+
+async function dragHandle(page: import('@playwright/test').Page, dy: number, settle: boolean) {
+  await page.locator('.handle').evaluate(
+    (el, args) => {
+      const box = el.getBoundingClientRect();
+      const x = box.x + box.width / 2;
+      const y = box.y + 4;
+      const fire = (type: string, clientY: number) =>
+        el.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            pointerId: 7,
+            pointerType: 'touch',
+            clientX: x,
+            clientY,
+          }),
+        );
+      fire('pointerdown', y);
+      for (let step = 1; step <= 4; step++) fire('pointermove', y + (args.dy * step) / 4);
+      if (args.settle) fire('pointerup', y + args.dy);
+    },
+    { dy, settle },
+  );
+}
+
+test('a long drag dismisses the sheet, a short one springs back', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'sheet behaviors are mobile only');
+  await page.goto(`/movie/${filmId}`);
+  await page.locator('.block').first().click();
+  await expect(page.locator('.panel')).toBeVisible();
+  // Mid-drag: the sheet follows the finger with the transition disabled.
+  await dragHandle(page, 40, false);
+  await expect(page.locator('.panel.dragging')).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('sheet-mid-drag.png') });
+  await page.locator('.handle').dispatchEvent('pointerup');
+  // 40px is under the threshold: it springs back and stays open.
+  await expect(page.locator('.panel')).toBeVisible();
+  await expect(page.locator('.panel')).not.toHaveClass(/dragging/);
+  // 120px crosses the threshold: dismissed.
+  await dragHandle(page, 120, true);
+  await expect(page.locator('.panel')).toHaveCount(0);
 });
 
 test('a seq deep link opens the panel on load', async ({ page }) => {
@@ -81,14 +186,35 @@ test('a seq deep link opens the panel on load', async ({ page }) => {
   await expect(page.locator('.neighbor').first()).toBeVisible();
 });
 
-test('the bridge page lays two films side by side', async ({ page }, testInfo) => {
+test('the bridge page draws one ribbon per shared moment', async ({ page }, testInfo) => {
   test.skip(pairA === 0, 'movie_pairs not loaded');
   await page.goto(`/movie/${pairA}/vs/${pairB}`);
   await expect(page.locator('h1')).toContainText('meets');
-  await expect(page.locator('.pair').first()).toBeVisible();
+  await expect(page.locator('.premise')).toContainText('more alike');
+  const figure = page.locator('svg[role="img"]');
+  await expect(figure).toBeVisible();
+  const declared = Number((await figure.getAttribute('aria-label'))?.match(/\d+/)?.[0]);
+  await expect(page.locator('.hit')).toHaveCount(declared);
+  // The strongest pair's excerpts show by default.
+  await expect(page.locator('.sides blockquote')).toHaveCount(2);
   if (testInfo.project.name === 'desktop') {
     await page.screenshot({ path: testInfo.outputPath('bridge-desktop.png'), fullPage: true });
+  } else {
+    await page.screenshot({ path: testInfo.outputPath('bridge-mobile.png'), fullPage: true });
   }
+});
+
+test('the stepper walks the matches and updates the excerpts', async ({ page }) => {
+  test.skip(pairA === 0, 'movie_pairs not loaded');
+  await page.goto(`/movie/${pairA}/vs/${pairB}`);
+  test.skip((await page.locator('.hit').count()) < 2, 'needs at least two shared moments');
+  const first = await page.locator('.sides blockquote').first().textContent();
+  await page.locator('.step-next').click();
+  await expect(page.locator('.stepper span')).toContainText('match 2 of');
+  await expect(page.locator('.sides blockquote').first()).not.toHaveText(first ?? '');
+  await page.locator('.step-prev').click();
+  await expect(page.locator('.stepper span')).toContainText('match 1 of');
+  await expect(page.locator('.sides blockquote').first()).toHaveText(first ?? '');
 });
 
 test('an unrelated pair shows the honest empty state', async ({ page }) => {
@@ -96,14 +222,19 @@ test('an unrelated pair shows the honest empty state', async ({ page }) => {
   // Toy Story and Se7en share a corpus, not moments.
   await page.goto('/movie/862/vs/807');
   await expect(page.locator('.empty')).toContainText('keep their distance');
-  await expect(page.locator('.pair')).toHaveCount(0);
+  await expect(page.locator('.hit')).toHaveCount(0);
 });
 
 test('bridge pairs never repeat a moment', async ({ page }) => {
   test.skip(pairA === 0, 'movie_pairs not loaded');
   await page.goto(`/movie/${pairA}/vs/${pairB}`);
-  const excerpts = await page.locator('.pair blockquote').allTextContents();
-  expect(new Set(excerpts).size).toBe(excerpts.length);
+  const count = await page.locator('.hit').count();
+  const seen: string[] = [];
+  for (let i = 0; i < count; i++) {
+    seen.push(...(await page.locator('.sides blockquote').allTextContents()));
+    if (i < count - 1) await page.locator('.step-next').click();
+  }
+  expect(new Set(seen).size).toBe(seen.length);
 });
 
 test('search results link into the moment', async ({ page }) => {
