@@ -88,21 +88,36 @@
 
   let provisionalIdx = $state<number | null>(null);
   let scrubbing = false;
+  let scrubFromX: number | null = null;
+  let scrubMoved = false;
+  let scrubSession = false;
 
   function segmentAtX(strip: HTMLElement, clientX: number) {
-    const box = strip.getBoundingClientRect();
-    const fraction = Math.min(Math.max((clientX - box.left) / box.width, 0), 0.9999);
-    const total = data.segments.reduce((sum, s) => sum + (s.endSeq - s.startSeq + 1), 0);
-    let acc = 0;
-    for (const segment of data.segments) {
-      acc += segment.endSeq - segment.startSeq + 1;
-      if (fraction < acc / total) return segment;
+    // Resolve against rendered geometry, not weight fractions: flex basis and
+    // the 2px gaps shift pixel boundaries off the weight-space ones, which
+    // made near-edge presses land one part back. Gaps go to the nearer block.
+    let best = data.segments[data.segments.length - 1]!;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    const blocks = strip.querySelectorAll<HTMLElement>('.block');
+    for (const block of blocks) {
+      const box = block.getBoundingClientRect();
+      const distance =
+        clientX < box.left ? box.left - clientX : clientX > box.right ? clientX - box.right : 0;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        const idx = Number(block.dataset.idx);
+        best = data.segments.find((s) => s.idx === idx) ?? best;
+        if (distance === 0) break;
+      }
     }
-    return data.segments[data.segments.length - 1]!;
+    return best;
   }
 
   function onScrubDown(event: PointerEvent) {
     scrubbing = true;
+    scrubSession = true;
+    scrubFromX = event.clientX;
+    scrubMoved = false;
     provisionalIdx = segmentAtX(event.currentTarget as HTMLElement, event.clientX).idx;
     try {
       (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
@@ -113,14 +128,44 @@
 
   function onScrubMove(event: PointerEvent) {
     if (!scrubbing) return;
+    if (scrubFromX !== null && Math.abs(event.clientX - scrubFromX) > 5) scrubMoved = true;
     provisionalIdx = segmentAtX(event.currentTarget as HTMLElement, event.clientX).idx;
   }
 
+  // Selection order matters: a tap must select on its trailing CLICK, after
+  // the gesture has no more events to deliver. Selecting on pointerup mounted
+  // the panel between pointerup and the synthesized click, which then landed
+  // on the new backdrop and closed the sheet in the same breath.
   function onScrubUp(event: PointerEvent) {
     if (!scrubbing) return;
     scrubbing = false;
-    const segment = segmentAtX(event.currentTarget as HTMLElement, event.clientX);
+    try {
+      (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+    } catch {
+      // Synthetic test events carry no active pointer.
+    }
     provisionalIdx = null;
+    if (scrubMoved) {
+      // A drag ends here; its click (if any) is suppressed by scrubMoved.
+      const segment = segmentAtX(event.currentTarget as HTMLElement, event.clientX);
+      void select(segment.startSeq, segment.idx);
+    }
+  }
+
+  // Tap environments disagree on event models (real iOS sends pointer events
+  // and detail-1 clicks; test WebKit sends touch plus detail-0 clicks; desktop
+  // sends both). Clicks are the one universal: blocks own clicks that hit
+  // them, the strip resolves clicks landing in gaps, and pointer events only
+  // add drag-to-scrub where they exist.
+  function onScrubClick(event: MouseEvent) {
+    scrubSession = false;
+    // A drag already selected on release; its trailing click must not reselect.
+    if (scrubMoved) {
+      scrubMoved = false;
+      return;
+    }
+    if (event.target !== event.currentTarget) return; // a block owns this click
+    const segment = segmentAtX(event.currentTarget as HTMLElement, event.clientX);
     void select(segment.startSeq, segment.idx);
   }
 
@@ -153,14 +198,26 @@
     if (dragY > 5) dragMoved = true;
   }
 
-  function onPointerUp() {
+  function onPointerUp(event: PointerEvent) {
     if (!dragging) return;
     dragging = false;
     dragFrom = null;
+    // Release capture and let the gesture finish on a live element before the
+    // sheet unmounts: WebKit wedges future pointer sequences when a captured
+    // element is removed mid-gesture, which made the sheet unopenable after a
+    // close on a real phone.
+    try {
+      (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+    } catch {
+      // Synthetic test events carry no active pointer.
+    }
     // iOS skips click synthesis for captured pointers, so the tap must be
     // recognized here: a press that never really moved is a close.
-    if (dragY > 60 || !dragMoved) close();
-    else dragY = 0;
+    if (dragY > 60 || !dragMoved) {
+      setTimeout(close, 0);
+    } else {
+      dragY = 0;
+    }
   }
 
   function onHandleClick(event: MouseEvent) {
@@ -250,6 +307,7 @@
         onpointerdown={onScrubDown}
         onpointermove={onScrubMove}
         onpointerup={onScrubUp}
+        onclick={onScrubClick}
         onpointercancel={() => {
           scrubbing = false;
           provisionalIdx = null;
@@ -268,7 +326,11 @@
               : provisionalIdx === segment.idx}
             style:flex-grow={segment.endSeq - segment.startSeq + 1}
             title="{pct(segment.arc)} through"
-            onclick={(e) => e.detail === 0 && select(segment.startSeq, segment.idx)}
+            onclick={() => {
+              // Any activation of the block itself selects it: finger, mouse,
+              // or keyboard. Drags are suppressed by the strip's click guard.
+              if (!scrubMoved) void select(segment.startSeq, segment.idx);
+            }}
           ></button>
         {/each}
       </div>

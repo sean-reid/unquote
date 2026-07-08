@@ -111,6 +111,11 @@ test('the far edge of the strip selects the last part', async ({ page }) => {
   // narrow its block renders.
   await strip.dispatchEvent('pointerdown', { clientX: box.x + box.width - 1, clientY: box.y + 5 });
   await strip.dispatchEvent('pointerup', { clientX: box.x + box.width - 1, clientY: box.y + 5 });
+  await strip.dispatchEvent('click', {
+    clientX: box.x + box.width - 1,
+    clientY: box.y + 5,
+    detail: 1,
+  });
   await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
   expect(requested[0]).toContain(`segment=${lastIdx}`);
   expect(requested[0]).toContain(`seq=${lastStart}`);
@@ -137,6 +142,11 @@ test('a middle block resolves to its own part, not its overlapping neighbor', as
   await page.locator('.scrubber').dispatchEvent('pointerup', {
     clientX: box.x + box.width / 2,
     clientY: box.y + 5,
+  });
+  await page.locator('.scrubber').dispatchEvent('click', {
+    clientX: box.x + box.width / 2,
+    clientY: box.y + 5,
+    detail: 1,
   });
   await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
   expect(requested[0]).toContain(`segment=${idx}`);
@@ -228,6 +238,34 @@ async function dragHandle(page: import('@playwright/test').Page, dy: number, set
     { dy, settle },
   );
 }
+
+test('the sheet reopens after every kind of close', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile', 'sheet behaviors are mobile only');
+  await page.goto(`/movie/${filmId}`);
+  const strip = page.locator('.scrubber');
+  const openSheet = async () => {
+    // Raw taps use viewport coordinates and never auto-scroll; bring the
+    // strip on screen and measure it fresh each time.
+    await strip.scrollIntoViewIfNeeded();
+    const box = (await strip.boundingBox())!;
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + 10);
+    await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  };
+  // Close by handle tap, reopen.
+  await openSheet();
+  const handle = (await page.locator('.handle').boundingBox())!;
+  await page.touchscreen.tap(handle.x + handle.width / 2, handle.y + 22);
+  await expect(page.locator('.panel')).toHaveCount(0);
+  await openSheet();
+  // Close by swipe, reopen.
+  await dragHandle(page, 120, true);
+  await expect(page.locator('.panel')).toHaveCount(0);
+  await openSheet();
+  // Close by backdrop, reopen.
+  await page.locator('.backdrop').click({ position: { x: 10, y: 10 } });
+  await expect(page.locator('.panel')).toHaveCount(0);
+  await openSheet();
+});
 
 test('a long drag dismisses the sheet, a short one springs back', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'mobile', 'sheet behaviors are mobile only');
