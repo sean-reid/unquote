@@ -8,3 +8,4 @@ playwright-report/
 test-results/
 packages/pipeline/data/
 PLAN.md
+packages/pipeline/python/.venv/

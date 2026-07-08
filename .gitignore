@@ -25,3 +25,5 @@ packages/pipeline/data/
 
 # OS
 .DS_Store
+venv/
+.venv/
