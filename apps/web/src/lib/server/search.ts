@@ -82,10 +82,11 @@ async function titleArm(queryNorm: string): Promise<MovieMatch | null> {
 async function exactArm(queryNorm: string): Promise<LineRow[]> {
   const result = await db.query({
     query: `
-      SELECT movie_id, seq, arc, text
-      FROM lines
-      WHERE positionCaseInsensitive(text_norm, {q:String}) > 0
-      ORDER BY length(text_norm) ASC, movie_id, seq
+      SELECT l.movie_id AS movie_id, l.seq AS seq, l.arc AS arc, l.text AS text
+      FROM lines AS l
+      INNER JOIN movies AS m ON m.id = l.movie_id
+      WHERE positionCaseInsensitive(l.text_norm, {q:String}) > 0
+      ORDER BY m.votes DESC, length(l.text_norm) ASC, l.movie_id, l.seq
       LIMIT {limit:UInt32}
     `,
     query_params: { q: queryNorm, limit: EXACT_LIMIT },
@@ -104,17 +105,18 @@ function tokenNeedles(tokens: string[]): string[] {
 }
 
 async function keywordArm(tokens: string[]): Promise<LineRow[]> {
-  const clauses = tokens.map((_, i) => `hasToken(text_norm, {t${i}:String})`).join(' AND ');
+  const clauses = tokens.map((_, i) => `hasToken(l.text_norm, {t${i}:String})`).join(' AND ');
   const params: Record<string, string | number> = { limit: KEYWORD_LIMIT };
   tokens.forEach((token, i) => {
     params[`t${i}`] = token;
   });
   const result = await db.query({
     query: `
-      SELECT movie_id, seq, arc, text
-      FROM lines
+      SELECT l.movie_id AS movie_id, l.seq AS seq, l.arc AS arc, l.text AS text
+      FROM lines AS l
+      INNER JOIN movies AS m ON m.id = l.movie_id
       WHERE ${clauses}
-      ORDER BY length(text_norm) ASC, movie_id, seq
+      ORDER BY m.votes DESC, length(l.text_norm) ASC, l.movie_id, l.seq
       LIMIT {limit:UInt32}
     `,
     query_params: params,
@@ -126,15 +128,18 @@ async function keywordArm(tokens: string[]): Promise<LineRow[]> {
 async function semanticArm(query: string): Promise<LineRow[]> {
   const vec = await embedQuery(query);
   const started = Date.now();
+  // cosineDistance ascending is the form the HNSW index accelerates; on
+  // normalized vectors it ranks identically to dot product descending.
   const result = await db.query({
     query: `
-      SELECT movie_id, seq, arc, text, dotProduct(vec, {vec:Array(Float32)}) AS score
+      SELECT movie_id, seq, arc, text
       FROM lines
-      ORDER BY score DESC
+      ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
       LIMIT {limit:UInt32}
     `,
     query_params: { vec: Array.from(vec), limit: SEMANTIC_LIMIT },
     format: 'JSONEachRow',
+    clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
   });
   const rows = (await result.json()) as LineRow[];
   console.log(`semantic arm: ${Date.now() - started}ms`);
@@ -301,7 +306,22 @@ export async function search(query: string): Promise<SearchResponse> {
       occurrences: 1,
     });
   }
-  hits.sort((a, b) => b.score - a.score);
+  // An exact hit already proves the queried line is in the film verbatim, so
+  // further arm agreement adds noise, not relevance. Within the exact set the
+  // film someone means is almost always the famous one: fame orders it. Fuzzy
+  // hits keep pure score order so descriptive queries are never steamrolled.
+  // Identical lines embed identically, so among films sharing a verbatim
+  // match every arm's ordering is an arbitrary tie-break; fame is the only
+  // real signal left and it orders the exact set. The originator of a line
+  // (Terminator for "I'll be back") is cultural knowledge no ranking can
+  // recover; the curated signature-line badge carries that instead. Fuzzy
+  // hits keep pure score order so descriptive queries are never steamrolled.
+  const isExact = (hit: SearchHit): boolean => hit.arms.includes('exact');
+  const votesOf = (hit: SearchHit): number => movieById.get(hit.movieId)?.votes ?? 0;
+  hits.sort((a, b) => {
+    if (isExact(a) && isExact(b)) return votesOf(b) - votesOf(a) || b.score - a.score;
+    return b.score - a.score;
+  });
 
   // A film often repeats a line ("May the Force be with you" four times in one
   // movie). Collapse identical text within a film to its best occurrence.
