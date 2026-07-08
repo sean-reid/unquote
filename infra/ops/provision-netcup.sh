@@ -280,7 +280,7 @@ step_server() {
     exit 2
   fi
   server_json=$(scp_api GET "/servers/$SERVER_ID")
-  SERVER_IP=$(printf '%s' "$server_json" | jq -r '.ipv4Addresses[0].ip // .ipv4Addresses[0] // empty')
+  SERVER_IP=$(printf '%s' "$server_json" | jq -r '(.ipv4Addresses[0] // empty) | if type == "object" then .ip else . end')
   say "  server $SERVER_ID: $(printf '%s' "$server_json" | jq -r '"\(.name) host=\(.hostname // "-") nick=\(.nickname // "-")"')"
   [ -n "$SERVER_IP" ] || {
     echo "server has no IPv4 address listed; check the SCP." >&2
