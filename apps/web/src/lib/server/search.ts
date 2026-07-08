@@ -1,4 +1,5 @@
 import {
+  EMBED_DIM,
   diffStats,
   normalize,
   rrf,
@@ -144,6 +145,56 @@ async function semanticArm(query: string): Promise<LineRow[]> {
   const rows = (await result.json()) as LineRow[];
   console.log(`semantic arm: ${Date.now() - started}ms`);
   return rows;
+}
+
+interface BeatRow {
+  movie_id: number;
+  start_seq: number;
+  arc: number;
+  text: string;
+}
+
+let beatsUsable: boolean | null = null;
+
+/** Beats join the search only when their vectors share the query encoder's dims. */
+async function beatsAvailable(): Promise<boolean> {
+  if (beatsUsable !== null) return beatsUsable;
+  try {
+    const result = await db.query({
+      query: 'SELECT length(vec) AS dim FROM beats LIMIT 1',
+      format: 'JSONEachRow',
+    });
+    const rows = (await result.json()) as Array<{ dim: number }>;
+    beatsUsable = rows[0]?.dim === EMBED_DIM;
+    if (rows.length > 0 && !beatsUsable) {
+      console.log(`beats disabled for search: dim ${rows[0]!.dim} != ${EMBED_DIM}`);
+    }
+  } catch {
+    beatsUsable = null;
+    return false;
+  }
+  return beatsUsable ?? false;
+}
+
+/**
+ * Descriptive queries and lines that split across cues live at exchange
+ * width; when nothing matches verbatim, nearby beats fill the gap.
+ */
+async function beatsArm(query: string): Promise<BeatRow[]> {
+  if (!(await beatsAvailable())) return [];
+  const vec = await embedQuery(query);
+  const result = await db.query({
+    query: `
+      SELECT movie_id, start_seq, arc, text
+      FROM beats
+      ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
+      LIMIT 10
+    `,
+    query_params: { vec: Array.from(vec) },
+    format: 'JSONEachRow',
+    clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
+  });
+  return (await result.json()) as BeatRow[];
 }
 
 interface PhraseRow {
@@ -306,10 +357,6 @@ export async function search(query: string): Promise<SearchResponse> {
       occurrences: 1,
     });
   }
-  // An exact hit already proves the queried line is in the film verbatim, so
-  // further arm agreement adds noise, not relevance. Within the exact set the
-  // film someone means is almost always the famous one: fame orders it. Fuzzy
-  // hits keep pure score order so descriptive queries are never steamrolled.
   // Identical lines embed identically, so among films sharing a verbatim
   // match every arm's ordering is an arbitrary tie-break; fame is the only
   // real signal left and it orders the exact set. The originator of a line
@@ -337,7 +384,38 @@ export async function search(query: string): Promise<SearchResponse> {
     seen.set(key, hit);
     deduped.push(hit);
   }
-  const top = deduped.slice(0, 50);
+  let top = deduped.slice(0, 50);
+
+  // With no verbatim match the memory may live at exchange width (a line
+  // split across speakers, or a described scene); blend the closest beats in
+  // among the fuzzy hits.
+  if (exact.length === 0) {
+    const beats = await beatsArm(query);
+    const beatHits: SearchHit[] = [];
+    for (const [rank, row] of beats.entries()) {
+      const meta = movieById.get(row.movie_id);
+      if (!meta) continue;
+      const excerpt =
+        row.text.length <= 200 ? row.text : `${row.text.slice(0, 200).replace(/ \S*$/, '')}...`;
+      beatHits.push({
+        movieId: row.movie_id,
+        title: meta.title,
+        year: meta.year,
+        posterPath: meta.poster_path,
+        seq: row.start_seq,
+        arc: row.arc,
+        text: excerpt,
+        score: 1.2 / (60 + rank + 1),
+        arms: ['semantic'],
+        occurrences: 1,
+      });
+    }
+    const known = new Set(top.map((hit) => `${hit.movieId}:${hit.seq}`));
+    top = top
+      .concat(beatHits.filter((hit) => !known.has(`${hit.movieId}:${hit.seq}`)))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 50);
+  }
 
   const misquote = misquotesByQuery.get(queryNorm) ?? null;
   if (!misquote) markNearMiss(queryNorm, top);

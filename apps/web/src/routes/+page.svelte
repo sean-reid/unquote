@@ -183,6 +183,9 @@
                   {#if hit.occurrences > 1}
                     <span class="arc">said {hit.occurrences} times</span>
                   {/if}
+                  <a class="moment" href="{resolve('/')}movie/{hit.movieId}?seq={hit.seq}">
+                    more like this moment
+                  </a>
                 </p>
               </div>
             </li>
@@ -463,6 +466,16 @@
 
   .arc {
     margin-left: var(--space-2);
+  }
+
+  .moment {
+    margin-left: var(--space-2);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  .moment:hover {
+    color: var(--accent);
   }
 
   .divider {
