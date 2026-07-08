@@ -19,23 +19,46 @@ with `resurrect.sh` in under an hour.
 
 ## First provision
 
-1. Netcup checkout: a VPS with 8 vCPU / 16 GB / 512 GB NVMe in the Manassas (US)
-   location, Ubuntu 24.04 LTS image, and your SSH public key. Any equivalent
-   box from another provider works the same way.
-2. Cloudflare DNS for dwainosaur.com: add an A record `unquote` pointing at the
-   server IP, proxied. Set SSL mode to "Full (strict)". If certificate issuance
-   fails on the very first deploy, gray-cloud the record, deploy, then re-enable
-   the proxy: the ACME HTTP challenge usually passes through fine, but that is
-   the escape hatch.
-3. On the server, as root:
-   `curl -fsSL https://raw.githubusercontent.com/sean-reid/unquote/main/infra/ops/setup.sh | bash`
-4. `cp /opt/unquote/infra/.env.example /opt/unquote/infra/.env` and fill in
-   three long random secrets (`openssl rand -hex 24` each).
-5. From the laptop: `UNQUOTE_HOST=root@<ip> infra/ops/deploy.sh`
-6. From the laptop, with the local ClickHouse running and loaded:
-   `UNQUOTE_HOST=root@<ip> infra/ops/push-data.sh`
-7. Uptime monitor: add an HTTPS check for `https://unquote.dwainosaur.com/` at
-   UptimeRobot (free tier) with email alerts.
+Two commands. The only human parts are the netcup checkout and pasting two
+tokens into `.env`.
+
+1. Buy the box: netcup VPS 2000 G12 (8 vCPU / 16 GB / 512 GB NVMe), location
+   Manassas (US). Whatever OS it ships with is fine; provisioning reinstalls it.
+2. Fill in `.env` at the repo root (gitignored):
+   - `NETCUP_SCP_USER`: your CCP customer number
+   - `NETCUP_SCP_TOKEN`: SCP top bar > API menu > create token
+   - `SERVER_ID`: shown in the SCP (the script lists candidates if unset)
+   - `CLOUDFLARE_API_TOKEN`: scoped to Zone > DNS > Edit on dwainosaur.com
+3. Review the plan, then run it:
+
+```bash
+infra/ops/provision-netcup.sh            # dry run, prints the full plan
+infra/ops/provision-netcup.sh --execute  # uploads the deploy key, reinstalls
+                                         # Ubuntu 24.04 with setup.sh as the
+                                         # bootstrap, points DNS, prints handoff
+```
+
+The script is idempotent: every step checks before acting (existing key
+reused, running reinstall task resumed, DNS updated in place), so rerunning
+after any failure continues where things stand. The reinstall step shows the
+target server and requires typing its id back before anything destructive.
+A DNS record pointing at a different IP needs `--force`.
+
+4. Finish per the printed handoff: server `.env` secrets, `deploy.sh`,
+   `push-data.sh`, the UptimeRobot check, and Cloudflare SSL "Full (strict)".
+   The certificate escape hatch: if first issuance fails behind the proxy,
+   gray-cloud the record, deploy, re-enable.
+
+Mock-tested end to end without touching real APIs:
+`infra/ops/test/provision-test.sh` (happy path both modes plus bad-token,
+existing-key, and DNS-conflict scenarios against `test/mock-api.js`).
+
+### Continuous deploys (optional)
+
+`.github/workflows/deploy.yml` ships main to the server on every push once
+you opt in: set repository secrets `SSH_PRIVATE_KEY` (the deploy key) and
+`DEPLOY_HOST` (`root@<ip>`), then set the repository variable
+`DEPLOY_ENABLED` to `true`. Until then the workflow is inert.
 
 ## Day to day
 
