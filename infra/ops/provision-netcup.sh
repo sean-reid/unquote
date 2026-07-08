@@ -28,7 +28,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 API_BASE=${NETCUP_API_BASE:-https://www.servercontrolpanel.de/scp-core/api/v1}
 TOKEN_URL=${NETCUP_TOKEN_URL:-https://www.servercontrolpanel.de/realms/scp/protocol/openid-connect/token}
 CF_API=${CF_API_BASE:-https://api.cloudflare.com/client/v4}
-OIDC_CLIENT_ID=${NETCUP_OIDC_CLIENT_ID:-scp-frontend}
+OIDC_CLIENT_ID=${NETCUP_OIDC_CLIENT_ID:-scp}
 
 ZONE_NAME=dwainosaur.com
 RECORD_NAME=unquote.dwainosaur.com
@@ -156,6 +156,12 @@ step_preflight() {
   if [ -f "$REPO_ROOT/.env" ]; then
     # shellcheck disable=SC1091
     set -a && . "$REPO_ROOT/.env" && set +a
+    # Defaults bound at the top of the script predate this load; re-resolve
+    # every env-overridable value so .env entries actually take effect.
+    API_BASE=${NETCUP_API_BASE:-$API_BASE}
+    TOKEN_URL=${NETCUP_TOKEN_URL:-$TOKEN_URL}
+    CF_API=${CF_API_BASE:-$CF_API}
+    OIDC_CLIENT_ID=${NETCUP_OIDC_CLIENT_ID:-$OIDC_CLIENT_ID}
   fi
   : "${NETCUP_SCP_USER:?set NETCUP_SCP_USER (CCP customer number)}"
   : "${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN (Zone > DNS > Edit)}"
@@ -274,7 +280,7 @@ step_server() {
     exit 2
   fi
   server_json=$(scp_api GET "/servers/$SERVER_ID")
-  SERVER_IP=$(printf '%s' "$server_json" | jq -r '.ipv4Addresses[0] // empty')
+  SERVER_IP=$(printf '%s' "$server_json" | jq -r '.ipv4Addresses[0].ip // .ipv4Addresses[0] // empty')
   say "  server $SERVER_ID: $(printf '%s' "$server_json" | jq -r '"\(.name) host=\(.hostname // "-") nick=\(.nickname // "-")"')"
   [ -n "$SERVER_IP" ] || {
     echo "server has no IPv4 address listed; check the SCP." >&2
