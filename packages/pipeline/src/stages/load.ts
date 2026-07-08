@@ -36,6 +36,7 @@ const INSERT_BATCH = 5000;
 
 function client(database?: string): ClickHouseClient {
   return createClient({
+    request_timeout: 600_000,
     url: process.env.CLICKHOUSE_URL ?? 'http://localhost:8123',
     username: process.env.CLICKHOUSE_USER ?? 'default',
     password: process.env.CLICKHOUSE_PASSWORD ?? 'unquote-local',
@@ -60,6 +61,8 @@ const MOVIES_COLUMNS = `
 
 // The vector index makes semantic search sub-100ms where brute force takes
 // over a second at 3.8M rows; bf16 storage halves its memory on the server.
+const LINES_VEC_INDEX = `INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', 384, 'bf16', 16, 128) GRANULARITY 100000000`;
+
 const LINES_COLUMNS = `
   movie_id UInt32,
   seq UInt32,
@@ -68,8 +71,10 @@ const LINES_COLUMNS = `
   text_norm String,
   vec Array(Float32),
   INDEX idx_text_norm text_norm TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4,
-  INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', 384, 'bf16', 16, 128) GRANULARITY 100000000
+  ${LINES_VEC_INDEX}
 `;
+
+const LINES_COLUMNS_NO_VEC_IDX = LINES_COLUMNS.replace(`,\n  ${LINES_VEC_INDEX}`, '');
 
 // Analytics tables hold live data written by the app; they are created once
 // and never take part in the staging swap, so reloads cannot clear them.
@@ -109,7 +114,9 @@ async function createTables(ch: ClickHouseClient): Promise<void> {
     query: `CREATE TABLE movies_staging (${MOVIES_COLUMNS}) ENGINE = MergeTree ORDER BY id`,
   });
   await ch.command({
-    query: `CREATE TABLE lines_staging (${LINES_COLUMNS}) ENGINE = MergeTree ORDER BY (movie_id, seq)`,
+    // Staging skips the vector index so inserts stay fast; it is added and
+    // materialized once, after all rows land, right before the swap.
+    query: `CREATE TABLE lines_staging (${LINES_COLUMNS_NO_VEC_IDX}) ENGINE = MergeTree ORDER BY (movie_id, seq)`,
     clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
   });
 }
@@ -186,6 +193,15 @@ async function loadLines(ch: ClickHouseClient, sliceIds: Set<number>): Promise<n
 }
 
 async function swap(ch: ClickHouseClient): Promise<void> {
+  await ch.command({
+    query: `ALTER TABLE lines_staging ADD INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', 384, 'bf16', 16, 128) GRANULARITY 100000000`,
+    clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
+  });
+  console.log('materializing vector index...');
+  await ch.command({
+    query: 'ALTER TABLE lines_staging MATERIALIZE INDEX vec_idx',
+    clickhouse_settings: { allow_experimental_vector_similarity_index: 1, mutations_sync: '2' },
+  });
   await ch.command({ query: 'EXCHANGE TABLES movies_staging AND movies' });
   await ch.command({ query: 'EXCHANGE TABLES lines_staging AND lines' });
   await ch.command({ query: 'DROP TABLE IF EXISTS movies_staging' });

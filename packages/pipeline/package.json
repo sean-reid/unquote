@@ -20,7 +20,9 @@
     "pairs": "uv sync -q --project python && uv run --project python python/pairs.py --data data",
     "map": "tsx src/stages/movie-map.ts",
     "five-lines": "tsx src/stages/five-lines.ts",
-    "load-ladder": "tsx src/stages/load-ladder.ts"
+    "load-ladder": "tsx src/stages/load-ladder.ts",
+    "reconcile": "uv sync -q --project python && uv run --project python python/reconcile.py --old-jsonl data/utterances.prev.jsonl --old-bin data/embeddings.prev.bin --new-jsonl data/utterances.jsonl --out-bin data/embeddings.bin",
+    "generic": "uv sync -q --project python && uv run --project python python/generic.py --beats data/beats.jsonl --bin data/beat-embeddings.bin --out data/beat-generic.bin"
   },
   "dependencies": {
     "@clickhouse/client": "^1.23.1",
