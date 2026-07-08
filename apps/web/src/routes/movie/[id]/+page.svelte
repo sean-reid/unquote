@@ -125,7 +125,11 @@
   {/if}
 
   {#if selectedSeq !== null}
-    <section class="panel" aria-label="Similar moments in other films">
+    <section
+      class="panel"
+      data-state={loading ? 'loading' : 'ready'}
+      aria-label="Similar moments in other films"
+    >
       <div class="dial" role="radiogroup" aria-label="How wide to match">
         {#each DIAL as option (option.level)}
           <button
