@@ -16,8 +16,9 @@ const musicals = new Set(
 const titles = new Map(movies.map((m) => [m.id, m.title]));
 
 // Group cues per film in layers: Springfield extractions, then rescue fills
-// (cues-rescue.jsonl, same shape), then upgrades (cues-upgrade.jsonl). A later
-// layer replaces a film's cues wholesale, so an upgraded transcript wins.
+// (cues-rescue.jsonl, same shape), then upgrades (cues-upgrade.jsonl), then
+// OpenSubtitles replacements (cues-os.jsonl). A later layer replaces a film's
+// cues wholesale, so an upgraded transcript wins.
 const filmCues = new Map<number, string[]>();
 const filmSource = new Map<number, string>();
 async function readCueFile(name: string): Promise<void> {
@@ -40,6 +41,7 @@ async function readCueFile(name: string): Promise<void> {
 await readCueFile('cues.jsonl');
 await readCueFile('cues-rescue.jsonl');
 await readCueFile('cues-upgrade.jsonl');
+await readCueFile('cues-os.jsonl');
 
 // A film's text is a draft screenplay only when it still rides on the IMSDb
 // rescue (rescue-report.json lists those); everything else is a transcript of

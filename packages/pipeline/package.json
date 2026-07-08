@@ -12,6 +12,7 @@
     "extract": "tsx src/stages/extract.ts",
     "utterances": "tsx src/stages/utterances.ts",
     "upgrade-transcripts": "tsx src/stages/upgrade.ts",
+    "upgrade-os": "tsx src/stages/upgrade-opensubtitles.ts",
     "embed": "uv sync -q --project python && uv run --project python python/embed.py --input data/utterances.jsonl --output data/embeddings.bin",
     "embed:cpu": "tsx src/stages/embed.ts",
     "load": "tsx src/stages/load.ts",
