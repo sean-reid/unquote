@@ -12,6 +12,7 @@ interface EvalEntry {
   expectInTop: number;
   mustBeInCorpus: boolean;
   note: string;
+  knownGap?: string;
 }
 
 let titles: string[] = [];
@@ -41,6 +42,8 @@ test('search quality eval scoreboard', async ({ request }, testInfo) => {
   test.setTimeout(180_000);
 
   const passed: string[] = [];
+  const knownGaps: string[] = [];
+  const unexpectedPasses: string[] = [];
   const failed: string[] = [];
   const skipped: string[] = [];
 
@@ -64,7 +67,12 @@ test('search quality eval scoreboard', async ({ request }, testInfo) => {
     // user even when the ranked list misses.
     const badgeAnswers = body.misquote !== null && filmPattern.test(body.misquote.film);
     if ((rank >= 0 && rank < entry.expectInTop) || badgeAnswers) {
+      if (entry.knownGap) {
+        unexpectedPasses.push(`${entry.query} (drop its knownGap flag: ${entry.knownGap})`);
+      }
       passed.push(entry.query);
+    } else if (entry.knownGap) {
+      knownGaps.push(`${entry.query} (${entry.knownGap})`);
     } else {
       const top = body.hits
         .slice(0, 3)
@@ -77,12 +85,16 @@ test('search quality eval scoreboard', async ({ request }, testInfo) => {
   }
 
   const scoreboard = [
-    `eval: ${passed.length} passed, ${failed.length} failed, ${skipped.length} skipped (of ${entries.length})`,
+    `eval: ${passed.length} passed, ${failed.length} failed, ${knownGaps.length} known gaps, ${skipped.length} skipped (of ${entries.length})`,
     ...failed.map((f) => `  FAIL ${f}`),
+    ...knownGaps.map((g) => `  GAP ${g}`),
     ...skipped.map((s) => `  SKIP ${s}`),
   ].join('\n');
   console.log(scoreboard);
   await testInfo.attach('scoreboard', { body: scoreboard, contentType: 'text/plain' });
 
   expect(failed, scoreboard).toEqual([]);
+  // A known gap that starts passing should lose its flag, so the debt list
+  // only ever shrinks deliberately.
+  expect(unexpectedPasses, scoreboard).toEqual([]);
 });

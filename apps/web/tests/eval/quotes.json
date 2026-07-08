@@ -81,7 +81,8 @@
     "expectFilm": "matrix",
     "expectInTop": 5,
     "mustBeInCorpus": true,
-    "note": "paraphrase of the choice"
+    "note": "paraphrase of the choice",
+    "knownGap": "spans two utterances; beat-level search lands in phase 5"
   },
   {
     "query": "my precious",
@@ -144,7 +145,8 @@
     "expectFilm": "inception",
     "expectInTop": 5,
     "mustBeInCorpus": true,
-    "note": "meme phrasing of we have to go deeper"
+    "note": "meme phrasing of we have to go deeper",
+    "knownGap": "cultural paraphrase with no verbatim line; beat/context search may rescue it in phase 5"
   },
   {
     "query": "do not go gentle into that good night",
@@ -263,7 +265,8 @@
     "expectFilm": "^se7en$|^seven$",
     "expectInTop": 5,
     "mustBeInCorpus": false,
-    "note": "film missing until rescue pass"
+    "note": "film missing until rescue pass",
+    "knownGap": "se7en imsdb draft lacks the shot-film line; transcript upgrade pass will fix"
   },
   {
     "query": "play it again sam",

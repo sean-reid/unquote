@@ -51,6 +51,23 @@ test('an emptied search box returns to the landing state', async ({ page }) => {
   await expect(page.locator('.tagline')).toBeVisible();
 });
 
+test('the native clear button also returns to the landing state', async ({ page }) => {
+  await page.goto('/?q=may the force be with you');
+  await expect(page.locator('.hit').first()).toBeVisible();
+  const box = page.getByRole('searchbox', { name: 'Search movie dialogue' });
+  await box.click();
+  const bounds = (await box.boundingBox())!;
+  // The clear control is a native pseudo-element with no locator; sweep the
+  // right edge until the value empties, then the page must reset.
+  for (const inset of [10, 18, 26, 34, 42]) {
+    await page.mouse.click(bounds.x + bounds.width - inset, bounds.y + bounds.height / 2);
+    if ((await box.inputValue()) === '') break;
+  }
+  expect(await box.inputValue()).toBe('');
+  await expect(page.locator('.hit')).toHaveCount(0);
+  await expect(page.locator('.tagline')).toBeVisible();
+});
+
 test('a repeated line collapses to one hit with a count', async ({ page }) => {
   await page.goto('/?q=may the force be with you');
   const exactHits = page
