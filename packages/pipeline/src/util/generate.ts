@@ -170,8 +170,10 @@ export function lintSummary(
 
 // Capitalized mid-sentence by quoting or splitter stumbles, never a name.
 const NOT_NAMES = new Set(
-  ('he she it we they you i who what when where why how the a an and but or nor so yet ' +
-    'his her its our their your this that these those there then now no yes not').split(' '),
+  (
+    'he she it we they you i who what when where why how the a an and but or nor so yet ' +
+    'his her its our their your this that these those there then now no yes not'
+  ).split(' '),
 );
 
 /** Content hash of the exact texts a generation saw; 16 hex chars is plenty. */
