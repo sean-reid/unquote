@@ -41,6 +41,12 @@ function client(database?: string): ClickHouseClient {
     username: process.env.CLICKHOUSE_USER ?? 'default',
     password: process.env.CLICKHOUSE_PASSWORD ?? 'unquote-local',
     database,
+    // Long inserts and mutations go quiet on the wire for minutes at a time;
+    // progress headers keep the socket alive through idle-timeout middleboxes.
+    clickhouse_settings: {
+      send_progress_in_http_headers: 1,
+      http_headers_progress_interval_ms: '20000',
+    },
   });
 }
 
