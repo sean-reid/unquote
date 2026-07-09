@@ -182,7 +182,13 @@ function runClaudeOnce(prompt: string): Promise<string> {
       ['-p', '--output-format', 'json', '--model', args.model!],
       { maxBuffer: 64 * 1024 * 1024, timeout: CLAUDE_TIMEOUT_MS },
       (err, stdout, stderr) =>
-        err ? rej(new Error(`claude exited: ${String(stderr).slice(0, 300)}`)) : res(stdout),
+        err
+          ? rej(
+              new Error(
+                `claude exited: ${String(stderr).slice(0, 200)} ${String(stdout).slice(0, 300)}`,
+              ),
+            )
+          : res(stdout),
     );
     child.stdin!.end(prompt);
   });
@@ -363,16 +369,39 @@ for (let at = 0; at < pending.length; at += BATCH) {
   log.info(`batch ${at / BATCH + 1}/${Math.ceil(pending.length / BATCH)}: ${rows.length} rows`);
 }
 } else {
-  // Windows batch by count, not by film: a segment span is many times the
-  // size of a five-quotes slate line, and films differ wildly in span count.
-  const allWindows = pending.flatMap((f) => f.windows);
+  // Windows batch by payload size, not by count: a segment span is many
+  // times the size of a five-quotes slate line, and a cluster of long
+  // segments packed twelve to an invocation overflows the prompt, which
+  // claude rejects. A window too big even alone keeps its head and tail;
+  // the lint only checks claims against the lines actually supplied.
+  const PAYLOAD_BUDGET = 60_000;
+  const trimWindow = (w: (typeof pending)[number]['windows'][number]) => {
+    const size = w.lines.reduce((n, l) => n + l.text.length + 24, 0);
+    if (size <= PAYLOAD_BUDGET) return w;
+    const keep = Math.floor((w.lines.length * PAYLOAD_BUDGET) / size);
+    const head = Math.max(1, Math.floor(keep * 0.7));
+    const tail = Math.max(1, keep - head);
+    return { ...w, lines: [...w.lines.slice(0, head), ...w.lines.slice(-tail)] };
+  };
+  const allWindows = pending.flatMap((f) => f.windows).map(trimWindow);
   log.step(`${allWindows.length} windows to generate`);
-  for (let at = 0; at < allWindows.length; at += WINDOW_BATCH) {
-    const items = allWindows.slice(at, at + WINDOW_BATCH).map((w) => ({
+  let at = 0;
+  while (at < allWindows.length) {
+    let size = 0;
+    let take = 0;
+    while (at + take < allWindows.length && take < WINDOW_BATCH) {
+      const w = allWindows[at + take]!;
+      const wSize = w.lines.reduce((n, l) => n + l.text.length + 24, 0);
+      if (take > 0 && size + wSize > PAYLOAD_BUDGET) break;
+      size += wSize;
+      take += 1;
+    }
+    const items = allWindows.slice(at, at + take).map((w) => ({
       ...w,
       title: byId.get(w.movieId)?.title,
       year: byId.get(w.movieId)?.year,
     }));
+    at += take;
     const rows: unknown[] = [];
     const { reply, model } = await invoke(items);
     const parsed =
@@ -409,10 +438,10 @@ for (let at = 0; at < pending.length; at += BATCH) {
         canonicalConfidence: draftIds.has(item.movieId) ? 'low' : 'normal',
       });
     }
-    await appendFile(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
-    log.info(
-      `windows ${Math.min(at + WINDOW_BATCH, allWindows.length)}/${allWindows.length}: ${rows.length} rows`,
-    );
+    if (rows.length > 0) {
+      await appendFile(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    }
+    log.info(`windows ${at}/${allWindows.length}: ${rows.length} rows`);
   }
 }
 
