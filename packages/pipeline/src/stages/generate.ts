@@ -121,16 +121,32 @@ function windows(lines: Utterance[], count: number): Utterance[][] {
   return out;
 }
 
-function runClaude(prompt: string): Promise<string> {
+function runClaudeOnce(prompt: string): Promise<string> {
   return new Promise((res, rej) => {
     const child = execFile(
       'claude',
       ['-p', '--output-format', 'json', '--model', args.model!],
       { maxBuffer: 64 * 1024 * 1024, timeout: CLAUDE_TIMEOUT_MS },
-      (err, stdout) => (err ? rej(err) : res(stdout)),
+      (err, stdout, stderr) =>
+        err ? rej(new Error(`claude exited: ${String(stderr).slice(0, 300)}`)) : res(stdout),
     );
     child.stdin!.end(prompt);
   });
+}
+
+// A single flaky exit must not kill a 265-batch run; the store checkpoints
+// per batch, so the only unrecoverable failure is one that repeats.
+async function runClaude(prompt: string): Promise<string> {
+  const waits = [30_000, 90_000, 180_000];
+  for (const wait of waits) {
+    try {
+      return await runClaudeOnce(prompt);
+    } catch (err) {
+      log.warn(`claude invocation failed, retrying in ${wait / 1000}s: ${String(err)}`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  return runClaudeOnce(prompt);
 }
 
 interface Envelope {
