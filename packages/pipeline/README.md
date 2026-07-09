@@ -4,15 +4,35 @@ Offline data pipeline. Each stage is a standalone script that reads and writes a
 
 ## Stages
 
-Run from this package with `pnpm <stage>`, in order:
+Run from this package with `pnpm <stage>`. The line track, in order:
 
-| Stage        | Reads                             | Writes                                                       |
-| ------------ | --------------------------------- | ------------------------------------------------------------ |
-| `slice`      | `movies.json`, `scripts.json`     | `slice.json` (top 300 by votes; `FULL=1` selects every film) |
-| `extract`    | `slice.json`, HTTP cache          | `cues.jsonl`, `extract-report.json`                          |
-| `utterances` | `cues.jsonl`, `cues-rescue.jsonl` | `utterances.jsonl`, `utterances-report.json`, `quality.json` |
-| `embed`      | `utterances.jsonl`                | `embeddings.bin`, `embeddings.meta.json`                     |
-| `load`       | artifacts above                   | ClickHouse tables (staging swap)                             |
+| Stage                 | Reads                                 | Writes                                                       |
+| --------------------- | ------------------------------------- | ------------------------------------------------------------ |
+| `slice`               | `movies.json`, `scripts.json`         | `slice.json` (top 300 by votes; `FULL=1` selects every film) |
+| `extract`             | `slice.json`, HTTP cache              | `cues.jsonl`, `extract-report.json`                          |
+| `upgrade-transcripts` | `cues.jsonl`, HTTP cache              | draft screenplays replaced, `upgrade-report.json`            |
+| `upgrade-os`          | `upgrade-report.json`, OpenSubtitles  | `cues-os.jsonl` replace layer, checkpointed download queue   |
+| `utterances`          | `cues*.jsonl`                         | `utterances.jsonl`, `utterances-report.json`, `quality.json` |
+| `embed`               | `utterances.jsonl`                    | `embeddings.bin`, `embeddings.meta.json`                     |
+| `load`                | artifacts above                       | ClickHouse `movies` + `lines` (staging swap)                 |
+
+The context ladder, after the line track:
+
+| Stage             | What it builds                                                            |
+| ----------------- | ------------------------------------------------------------------------- |
+| `beats`           | overlapping exchange windows over the utterances                          |
+| `embed-beats`     | 768d beat vectors (or `reconcile` to reuse unchanged rows after an edit)  |
+| `generic`         | per-beat genericness against the whole corpus                             |
+| `segments`        | scene-sized spans from beat similarity                                    |
+| `pairs`, `map`    | film-to-film neighbors and the 2d corpus map                              |
+| `five-lines`      | fallback five-line picks (the shipped picks come from `generate`)         |
+| `generate`        | headless-claude five quotes and scene summaries, validated and versioned  |
+| `embed-summaries` | summary vectors for descriptive search, incremental as the store grows    |
+| `load-ladder`     | every ladder table into ClickHouse (staging swap)                         |
+
+`reconcile` is the cheap path after any text-touching change: it copies vectors
+for unchanged rows byte for byte and embeds only what changed, for lines and
+beats alike.
 
 `pnpm embed` runs the GPU embedder under `python/` (3.4x faster; see the GPU embedder section). `pnpm embed:cpu` runs the js stage, the reference implementation: it shares runtime and recipe with the web app's query encoder, defines the encoding every other path is validated against, and keeps the pipeline runnable where Python or Metal is unavailable.
 

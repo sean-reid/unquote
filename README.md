@@ -1,6 +1,6 @@
 # Unquote
 
-Search the dialogue of ~2,500 films. Type a quote, a quote you only half remember, a scene you can describe but can't place, or just a movie title. Unquote finds the line, shows you the moment around it, and can tell you what else in cinema that moment resembles.
+Search the dialogue of ~2,600 films. Type a quote, a quote you only half remember, a scene you can describe but can't place, or just a movie title. Unquote finds the line, shows you the moment around it, and can tell you what else in cinema that moment resembles.
 
 ## Structure
 
