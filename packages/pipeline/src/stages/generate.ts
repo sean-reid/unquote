@@ -50,7 +50,7 @@ const BATCH = 10;
 const WINDOW_BATCH = 12;
 const SNAP_MIN = 0.55;
 const CLAUDE_TIMEOUT_MS = 10 * 60 * 1000;
-const CONCURRENCY_CAP = 10;
+const CONCURRENCY_CAP = 20;
 
 const { values: args } = parseArgs({
   // pnpm forwards script flags behind a bare --, which parseArgs would
