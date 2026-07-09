@@ -461,9 +461,7 @@ describe('fixOcrArtifacts', () => {
 describe('punctuation spacing', () => {
   it('reattaches French-spaced punctuation in any film', () => {
     expect(cleanCueText('Manure ! I hate manure !')).toBe('Manure! I hate manure!');
-    expect(cleanCueText('Why ? Because I said so ; twice.')).toBe(
-      'Why? Because I said so; twice.',
-    );
+    expect(cleanCueText('Why ? Because I said so ; twice.')).toBe('Why? Because I said so; twice.');
     expect(cleanCueText('Wait . . . what?')).toBe('Wait... what?');
   });
 });

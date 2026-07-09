@@ -26,9 +26,7 @@ function keyFor(url: string): string {
  */
 export function backoffMs(retryAfter: string | null, attempt: number): number {
   const seconds = retryAfter === null ? NaN : Number(retryAfter);
-  return Number.isFinite(seconds) && seconds > 0
-    ? seconds * 1000
-    : BACKOFF_BASE_MS * 2 ** attempt;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : BACKOFF_BASE_MS * 2 ** attempt;
 }
 
 async function readCache(key: string): Promise<string | null> {

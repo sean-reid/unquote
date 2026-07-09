@@ -77,15 +77,13 @@ const byId = new Map(movies.map((m) => [m.id, m]));
 const upgradePath = resolve(DATA_DIR, 'upgrade-report.json');
 const draftIds = new Set<number>(
   existsSync(upgradePath)
-    ? (
+    ? ((
         await readJson<{ draftsRemaining?: Array<{ movieId: number }> }>(upgradePath)
-      ).draftsRemaining?.map((d) => d.movieId) ?? []
+      ).draftsRemaining?.map((d) => d.movieId) ?? [])
     : [],
 );
 
-const wanted = args.movies
-  ? new Set(args.movies.split(',').map((s) => Number(s.trim())))
-  : null;
+const wanted = args.movies ? new Set(args.movies.split(',').map((s) => Number(s.trim()))) : null;
 const filmLimit = args.limit ? Number(args.limit) : Infinity;
 
 const storePath = resolve(DATA_DIR, 'generated', `${kind}.jsonl`);
@@ -166,10 +164,16 @@ if (kind === 'scene-summary') {
     row += 1;
   }
   for (const [movieId, segs] of segsByMovie) {
-    surfaced.set(movieId, tierWindows(rankWindows(segs, generic, beatBase.get(movieId) ?? 0), tier));
+    surfaced.set(
+      movieId,
+      tierWindows(rankWindows(segs, generic, beatBase.get(movieId) ?? 0), tier),
+    );
   }
   for (const [movieId, beats] of orphanBeats) {
-    surfaced.set(movieId, tierWindows(beatFallback(beats, generic, beatBase.get(movieId) ?? 0), tier));
+    surfaced.set(
+      movieId,
+      tierWindows(beatFallback(beats, generic, beatBase.get(movieId) ?? 0), tier),
+    );
   }
   const total = [...surfaced.values()].reduce((n, w) => n + w.length, 0);
   log.info(`tier ${tier}: ${total} windows across ${surfaced.size} films`);
@@ -305,71 +309,76 @@ let unanswered = 0;
 let lintFailed = 0;
 
 if (kind === 'five-quotes') {
-for (let at = 0; at < pending.length; at += BATCH) {
-  const batch = pending.slice(at, at + BATCH);
-  const rows: unknown[] = [];
+  for (let at = 0; at < pending.length; at += BATCH) {
+    const batch = pending.slice(at, at + BATCH);
+    const rows: unknown[] = [];
 
-  {
-    const payload = batch.map((f) => ({
-      movieId: f.movieId,
-      title: byId.get(f.movieId)?.title,
-      year: byId.get(f.movieId)?.year,
-      lines: slate(f.lines).map((u) => ({ seq: u.seq, text: u.text })),
-    }));
-    const { reply, model } = await invoke(payload);
-    const parsed =
-      extractJson<Array<{ movieId: number; quotes: Array<{ seq?: number | null; text: string }> }>>(
-        reply,
-      );
-    for (const film of batch) {
-      const answer = parsed.find((p) => p.movieId === film.movieId);
-      const matcher = new FilmMatcher(film.lines);
-      const quotes: unknown[] = [];
-      const misses: string[] = [];
-      for (const q of answer?.quotes ?? []) {
-        const m = matcher.match(q.text, q.seq);
-        if (m?.verbatim) {
-          verbatim += 1;
-          quotes.push({ seq: m.line.seq, arc: m.line.arc, text: m.line.text, source: 'verbatim' });
-        } else if (m && m.score >= SNAP_MIN) {
-          snapped += 1;
-          quotes.push({
-            seq: m.line.seq,
-            arc: m.line.arc,
-            text: m.line.text,
-            source: 'snapped',
-            score: Number(m.score.toFixed(3)),
-            asGenerated: q.text,
-          });
-        } else {
-          dropped += 1;
-          misses.push(q.text);
+    {
+      const payload = batch.map((f) => ({
+        movieId: f.movieId,
+        title: byId.get(f.movieId)?.title,
+        year: byId.get(f.movieId)?.year,
+        lines: slate(f.lines).map((u) => ({ seq: u.seq, text: u.text })),
+      }));
+      const { reply, model } = await invoke(payload);
+      const parsed =
+        extractJson<
+          Array<{ movieId: number; quotes: Array<{ seq?: number | null; text: string }> }>
+        >(reply);
+      for (const film of batch) {
+        const answer = parsed.find((p) => p.movieId === film.movieId);
+        const matcher = new FilmMatcher(film.lines);
+        const quotes: unknown[] = [];
+        const misses: string[] = [];
+        for (const q of answer?.quotes ?? []) {
+          const m = matcher.match(q.text, q.seq);
+          if (m?.verbatim) {
+            verbatim += 1;
+            quotes.push({
+              seq: m.line.seq,
+              arc: m.line.arc,
+              text: m.line.text,
+              source: 'verbatim',
+            });
+          } else if (m && m.score >= SNAP_MIN) {
+            snapped += 1;
+            quotes.push({
+              seq: m.line.seq,
+              arc: m.line.arc,
+              text: m.line.text,
+              source: 'snapped',
+              score: Number(m.score.toFixed(3)),
+              asGenerated: q.text,
+            });
+          } else {
+            dropped += 1;
+            misses.push(q.text);
+          }
         }
+        // A film the model skipped, or whose picks all failed validation, must
+        // not be keyed as done: leaving it out of the store makes the next run
+        // retry it instead of shipping an empty entry forever.
+        if (quotes.length === 0) {
+          unanswered += 1;
+          log.warn(`movie ${film.movieId}: no quotes survived, will retry next run`);
+          continue;
+        }
+        rows.push({
+          movieId: film.movieId,
+          inputHash: film.hash,
+          promptVersion,
+          model,
+          quotes,
+          dropped: misses,
+          draftSource: draftIds.has(film.movieId),
+          canonicalConfidence: draftIds.has(film.movieId) ? 'low' : 'normal',
+        });
       }
-      // A film the model skipped, or whose picks all failed validation, must
-      // not be keyed as done: leaving it out of the store makes the next run
-      // retry it instead of shipping an empty entry forever.
-      if (quotes.length === 0) {
-        unanswered += 1;
-        log.warn(`movie ${film.movieId}: no quotes survived, will retry next run`);
-        continue;
-      }
-      rows.push({
-        movieId: film.movieId,
-        inputHash: film.hash,
-        promptVersion,
-        model,
-        quotes,
-        dropped: misses,
-        draftSource: draftIds.has(film.movieId),
-        canonicalConfidence: draftIds.has(film.movieId) ? 'low' : 'normal',
-      });
     }
-  }
 
-  await appendFile(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
-  log.info(`batch ${at / BATCH + 1}/${Math.ceil(pending.length / BATCH)}: ${rows.length} rows`);
-}
+    await appendFile(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    log.info(`batch ${at / BATCH + 1}/${Math.ceil(pending.length / BATCH)}: ${rows.length} rows`);
+  }
 } else {
   // Windows batch by payload size, not by count: a segment span is many
   // times the size of a five-quotes slate line, and a cluster of long
@@ -405,7 +414,12 @@ for (let at = 0; at < pending.length; at += BATCH) {
     }));
     at += take;
     const rows: unknown[] = [];
-    type Answer = { windowId: string; headline: string; summary: string; evidence: EvidenceRange[] };
+    type Answer = {
+      windowId: string;
+      headline: string;
+      summary: string;
+      evidence: EvidenceRange[];
+    };
     const refused = new Set<string>();
     let model = args.model!;
     // A policy refusal poisons a whole batch; bisect to isolate the window
@@ -423,10 +437,7 @@ for (let at = 0; at < pending.length; at += BATCH) {
           return [];
         }
         const mid = Math.ceil(slice.length / 2);
-        return [
-          ...(await summarize(slice.slice(0, mid))),
-          ...(await summarize(slice.slice(mid))),
-        ];
+        return [...(await summarize(slice.slice(0, mid))), ...(await summarize(slice.slice(mid)))];
       }
     };
     const parsed = await summarize(items);

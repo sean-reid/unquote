@@ -28,7 +28,8 @@ describe('srtToCues', () => {
   });
 
   it('survives a byte-order mark and blocks without index lines', () => {
-    const srt = '﻿00:00:01,000 --> 00:00:02,000\nHello there.\n\n\n2\n00:00:03,000 --> 00:00:04,000\nGeneral.\n';
+    const srt =
+      '﻿00:00:01,000 --> 00:00:02,000\nHello there.\n\n\n2\n00:00:03,000 --> 00:00:04,000\nGeneral.\n';
     expect(srtToCues(srt)).toEqual(['Hello there.', 'General.']);
   });
 
@@ -39,7 +40,12 @@ describe('srtToCues', () => {
 });
 
 describe('pickBest', () => {
-  const base = { fileName: 'a.srt', downloadCount: 100, hearingImpaired: false, fromTrusted: false };
+  const base = {
+    fileName: 'a.srt',
+    downloadCount: 100,
+    hearingImpaired: false,
+    fromTrusted: false,
+  };
   it('prefers non-hearing-impaired, then trusted, then downloads, and gates year', () => {
     const best = pickBest(
       [

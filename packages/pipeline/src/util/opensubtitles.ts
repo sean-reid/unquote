@@ -178,7 +178,9 @@ export class OsClient {
       throw new QuotaExhausted(this.resetTime);
     }
     if (!response.ok || !body.link) {
-      throw new Error(`download failed for file ${fileId}: ${response.status} ${body.message ?? ''}`);
+      throw new Error(
+        `download failed for file ${fileId}: ${response.status} ${body.message ?? ''}`,
+      );
     }
 
     const file = await this.request(body.link);

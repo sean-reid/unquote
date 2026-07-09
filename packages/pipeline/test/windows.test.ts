@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { TIER1_PER_FILM, beatFallback, rankWindows, tierWindows } from '../src/util/windows.js';
 
-const seg = (idx: number, startBeat: number, endBeat: number, startSeq: number, endSeq: number) => ({
+const seg = (
+  idx: number,
+  startBeat: number,
+  endBeat: number,
+  startSeq: number,
+  endSeq: number,
+) => ({
   movieId: 7,
   idx,
   startBeat,
@@ -41,7 +47,9 @@ describe('tierWindows', () => {
   it('tier 1 is the most distinctive slice per film, in story order', () => {
     const one = tierWindows(ranked, '1');
     expect(one).toHaveLength(TIER1_PER_FILM);
-    expect(one.map((w) => w.startSeq)).toEqual([...one.map((w) => w.startSeq)].sort((a, b) => a - b));
+    expect(one.map((w) => w.startSeq)).toEqual(
+      [...one.map((w) => w.startSeq)].sort((a, b) => a - b),
+    );
     const kept = new Set(one.map((w) => w.startSeq));
     for (const w of ranked.slice(0, TIER1_PER_FILM)) expect(kept.has(w.startSeq)).toBe(true);
   });

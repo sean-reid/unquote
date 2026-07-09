@@ -49,7 +49,10 @@ if (existsSync(reportPath)) {
   );
   targets.push(...(report.draftsRemaining ?? []));
 }
-for (const id of (args.movies ?? '').split(',').map((s) => Number(s.trim())).filter(Boolean)) {
+for (const id of (args.movies ?? '')
+  .split(',')
+  .map((s) => Number(s.trim()))
+  .filter(Boolean)) {
   const movie = byId.get(id);
   if (movie && !targets.some((t) => t.movieId === id)) {
     targets.push({ movieId: id, title: movie.title });

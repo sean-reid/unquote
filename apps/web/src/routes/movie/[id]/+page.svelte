@@ -190,9 +190,7 @@
     if (!keys.includes(event.key)) return;
     event.preventDefault();
     const segments = data.segments;
-    const current = selectedSegment
-      ? segments.findIndex((s) => s.idx === selectedSegment.idx)
-      : -1;
+    const current = selectedSegment ? segments.findIndex((s) => s.idx === selectedSegment.idx) : -1;
     const target =
       event.key === 'Home'
         ? 0
