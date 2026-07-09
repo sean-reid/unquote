@@ -452,18 +452,27 @@ if (kind === 'five-quotes') {
     };
     const refused = new Set<string>();
     let model = args.model!;
-    // A policy refusal poisons a whole batch; bisect to isolate the window
-    // that triggers it, park just that one, and generate the rest.
+    // A policy refusal or an unparseable reply poisons a whole batch; bisect
+    // to isolate the window behind it and generate the rest. A refusal is
+    // deterministic so the lone window parks; a parse failure is not, so the
+    // window stays unbanked and the next run simply retries it.
     const summarize = async (slice: typeof items): Promise<Answer[]> => {
       try {
         const result = await invoke(slice);
         model = result.model;
         return extractJson<Answer[]>(result.reply);
       } catch (err) {
-        if (!String(err).includes('Usage Policy')) throw err;
+        const policy = String(err).includes('Usage Policy');
+        const unparsed =
+          err instanceof SyntaxError || /no JSON in reply|unterminated JSON/.test(String(err));
+        if (!policy && !unparsed) throw err;
         if (slice.length === 1) {
-          refused.add(slice[0]!.windowId);
-          log.warn(`window ${slice[0]!.windowId} refused on policy; parked`);
+          if (policy) {
+            refused.add(slice[0]!.windowId);
+            log.warn(`window ${slice[0]!.windowId} refused on policy; parked`);
+          } else {
+            log.warn(`window ${slice[0]!.windowId} reply unparseable; left for a later run`);
+          }
           return [];
         }
         const mid = Math.ceil(slice.length / 2);
