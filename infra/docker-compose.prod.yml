@@ -26,15 +26,9 @@ services:
         soft: 262144
         hard: 262144
     healthcheck:
-      test:
-        [
-          'CMD',
-          'clickhouse-client',
-          '--password',
-          '${CLICKHOUSE_ADMIN_PASSWORD}',
-          '--query',
-          'SELECT 1',
-        ]
+      # The unauthenticated ping endpoint: a password here would sit in
+      # docker inspect output for anyone with docker socket access.
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:8123/ping']
       interval: 10s
       timeout: 5s
       retries: 12
