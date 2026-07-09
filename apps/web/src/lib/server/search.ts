@@ -154,6 +154,7 @@ interface BeatRow {
 }
 
 let beatsUsable: boolean | null = null;
+let beatsProbeWarned = false;
 
 /** Beats join the search only when their vectors share the query encoder's dims. */
 async function beatsAvailable(): Promise<boolean> {
@@ -168,7 +169,13 @@ async function beatsAvailable(): Promise<boolean> {
     if (rows.length > 0 && !beatsUsable) {
       console.log(`beats disabled for search: dim ${rows[0]!.dim} != ${WIDE_EMBED_DIM}`);
     }
-  } catch {
+  } catch (error) {
+    // A missing or unreadable table degrades the arm; without this line it
+    // degrades invisibly and looks like bad ranking.
+    if (!beatsProbeWarned) {
+      beatsProbeWarned = true;
+      console.warn('beats arm disabled:', error instanceof Error ? error.message : error);
+    }
     beatsUsable = null;
     return false;
   }
@@ -198,6 +205,7 @@ async function beatsArm(query: string): Promise<Array<BeatRow & { dist: number }
 }
 
 let summariesUsable: boolean | null = null;
+let summariesProbeWarned = false;
 
 /** Summary vectors join the search once the table has embedded rows. */
 async function summariesAvailable(): Promise<boolean> {
@@ -209,7 +217,11 @@ async function summariesAvailable(): Promise<boolean> {
     });
     const rows = (await result.json()) as Array<{ dim: number }>;
     summariesUsable = rows[0]?.dim === WIDE_EMBED_DIM;
-  } catch {
+  } catch (error) {
+    if (!summariesProbeWarned) {
+      summariesProbeWarned = true;
+      console.warn('summaries arm disabled:', error instanceof Error ? error.message : error);
+    }
     summariesUsable = null;
     return false;
   }
