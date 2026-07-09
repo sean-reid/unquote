@@ -42,6 +42,7 @@ import {
   type SummaryRow,
 } from '../util/generated.js';
 import { log } from '../util/log.js';
+import { SerialWriter, Throttle, runPool } from '../util/pool.js';
 import { beatFallback, rankWindows, tierWindows, type SegmentSpan } from '../util/windows.js';
 import type { MovieRecord, Utterance } from '../types.js';
 
@@ -49,6 +50,7 @@ const BATCH = 10;
 const WINDOW_BATCH = 12;
 const SNAP_MIN = 0.55;
 const CLAUDE_TIMEOUT_MS = 10 * 60 * 1000;
+const CONCURRENCY_CAP = 8;
 
 const { values: args } = parseArgs({
   // pnpm forwards script flags behind a bare --, which parseArgs would
@@ -62,6 +64,7 @@ const { values: args } = parseArgs({
     tier: { type: 'string', default: '1' },
     model: { type: 'string', default: 'sonnet' },
     repair: { type: 'boolean', default: false },
+    concurrency: { type: 'string', default: '4' },
   },
 });
 const kind = args.kind;
@@ -222,21 +225,27 @@ function runClaudeOnce(prompt: string): Promise<string> {
   });
 }
 
+// The throttle is shared across the pool: one limit-flavored failure drains
+// every worker to single file for the cooldown, so parallel retries can
+// never hammer through a usage limit.
+const throttle = new Throttle();
+
 // A single flaky exit must not kill a 265-batch run; the store checkpoints
 // per batch, so the only unrecoverable failure is one that repeats.
 async function runClaude(prompt: string): Promise<string> {
   const waits = [30_000, 90_000, 180_000];
   for (const wait of waits) {
     try {
-      return await runClaudeOnce(prompt);
+      return await throttle.gate(() => runClaudeOnce(prompt));
     } catch (err) {
       // A usage-policy refusal is deterministic; retrying only burns time.
       if (String(err).includes('Usage Policy')) throw err;
+      throttle.note(err);
       log.warn(`claude invocation failed, retrying in ${wait / 1000}s: ${String(err)}`);
       await new Promise((r) => setTimeout(r, wait));
     }
   }
-  return runClaudeOnce(prompt);
+  return throttle.gate(() => runClaudeOnce(prompt));
 }
 
 interface Envelope {
@@ -410,6 +419,10 @@ if (kind === 'five-quotes') {
   };
   const allWindows = pending.flatMap((f) => f.windows).map(trimWindow);
   log.step(`${allWindows.length} windows to generate`);
+  // Batches pre-pack to the payload budget, then run through a worker pool;
+  // appends serialize through one writer so batches finishing together can
+  // never interleave partial lines in the store.
+  const batches: (typeof allWindows)[] = [];
   let at = 0;
   while (at < allWindows.length) {
     let size = 0;
@@ -421,8 +434,15 @@ if (kind === 'five-quotes') {
       size += wSize;
       take += 1;
     }
-    const items = allWindows.slice(at, at + take).map((w) => windowPayload(w, byId.get(w.movieId)));
+    batches.push(allWindows.slice(at, at + take));
     at += take;
+  }
+  const concurrency = Math.min(CONCURRENCY_CAP, Math.max(1, Number(args.concurrency) || 1));
+  log.info(`${batches.length} batches, ${concurrency} in flight`);
+  const writer = new SerialWriter();
+  let done = 0;
+  await runPool(batches, concurrency, async (batchWindows) => {
+    const items = batchWindows.map((w) => windowPayload(w, byId.get(w.movieId)));
     const rows: unknown[] = [];
     type Answer = {
       windowId: string;
@@ -494,10 +514,11 @@ if (kind === 'five-quotes') {
       });
     }
     if (rows.length > 0) {
-      await appendFile(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+      await writer.write(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     }
-    log.info(`windows ${at}/${allWindows.length}: ${rows.length} rows`);
-  }
+    done += items.length;
+    log.info(`windows ${done}/${allWindows.length}: ${rows.length} rows`);
+  });
 }
 
 if (kind === 'five-quotes') {
