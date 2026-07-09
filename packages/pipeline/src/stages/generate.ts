@@ -7,8 +7,12 @@
  * every invocation; a killed run loses at most one batch.
  *
  * Run: pnpm generate --kind five-quotes --movies 11,2493,807
- *      pnpm generate --kind scene-summary --movies 11 --windows 3
+ *      pnpm generate --kind scene-summary --tier 1
  *      pnpm generate --kind five-quotes            (whole corpus)
+ *
+ * Scene-summary windows are the ladder's segments (tier 1: the surfaced
+ * slice per film, tier 2: the rest), so summaries describe the same moments
+ * the site navigates to.
  */
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -29,12 +33,19 @@ import {
   type GenerationKey,
 } from '../util/generate.js';
 import { log } from '../util/log.js';
+import {
+  beatFallback,
+  rankWindows,
+  tierWindows,
+  type RankedWindow,
+  type SegmentSpan,
+} from '../util/windows.js';
 import type { MovieRecord, Utterance } from '../types.js';
 
 const BATCH = 10;
+const WINDOW_BATCH = 12;
 const SNAP_MIN = 0.55;
 const CLAUDE_TIMEOUT_MS = 10 * 60 * 1000;
-const WINDOW_LINES = 12;
 
 const { values: args } = parseArgs({
   // pnpm forwards script flags behind a bare --, which parseArgs would
@@ -45,7 +56,7 @@ const { values: args } = parseArgs({
     kind: { type: 'string' },
     movies: { type: 'string' },
     limit: { type: 'string' },
-    windows: { type: 'string' },
+    tier: { type: 'string', default: '1' },
     model: { type: 'string', default: 'sonnet' },
   },
 });
@@ -111,14 +122,57 @@ function slate(lines: Utterance[]): Utterance[] {
   return picked;
 }
 
-function windows(lines: Utterance[], count: number): Utterance[][] {
-  const out: Utterance[][] = [];
-  for (let w = 1; w <= count; w++) {
-    const at = Math.floor((lines.length * w) / (count + 1));
-    const start = Math.max(0, Math.min(at, lines.length - WINDOW_LINES));
-    out.push(lines.slice(start, start + WINDOW_LINES));
+// Scene-summary windows come from the ladder artifacts, not evenly spaced
+// samples: each window is a segment's utterance span, ranked per film by
+// beat genericness so the surfaced tier generates first. Films the segments
+// stage skipped (none today) fall back to their beats.
+const surfaced = new Map<number, RankedWindow[]>();
+if (kind === 'scene-summary') {
+  const tier = args.tier as '1' | '2' | 'all';
+  if (tier !== '1' && tier !== '2' && tier !== 'all') {
+    throw new Error('--tier must be 1, 2, or all');
   }
-  return out;
+  const genericBytes = await readFile(resolve(DATA_DIR, 'beat-generic.bin'));
+  const generic = new Float32Array(
+    genericBytes.buffer,
+    genericBytes.byteOffset,
+    genericBytes.byteLength / 4,
+  );
+  const segsByMovie = new Map<number, SegmentSpan[]>();
+  for await (const s of readJsonl<SegmentSpan>(resolve(DATA_DIR, 'segments.jsonl'))) {
+    const list = segsByMovie.get(s.movieId);
+    if (list) list.push(s);
+    else segsByMovie.set(s.movieId, [s]);
+  }
+  const beatBase = new Map<number, number>();
+  const orphanBeats = new Map<
+    number,
+    Array<{ movieId: number; idx: number; startSeq: number; endSeq: number }>
+  >();
+  let row = 0;
+  for await (const b of readJsonl<{
+    movieId: number;
+    idx: number;
+    startSeq: number;
+    endSeq: number;
+  }>(resolve(DATA_DIR, 'beats.jsonl'))) {
+    if (!beatBase.has(b.movieId)) beatBase.set(b.movieId, row);
+    if (!segsByMovie.has(b.movieId)) {
+      const list = orphanBeats.get(b.movieId);
+      const span = { movieId: b.movieId, idx: b.idx, startSeq: b.startSeq, endSeq: b.endSeq };
+      if (list) list.push(span);
+      else orphanBeats.set(b.movieId, [span]);
+    }
+    row += 1;
+  }
+  for (const [movieId, segs] of segsByMovie) {
+    surfaced.set(movieId, tierWindows(rankWindows(segs, generic, beatBase.get(movieId) ?? 0), tier));
+  }
+  for (const [movieId, beats] of orphanBeats) {
+    surfaced.set(movieId, tierWindows(beatFallback(beats, generic, beatBase.get(movieId) ?? 0), tier));
+  }
+  const total = [...surfaced.values()].reduce((n, w) => n + w.length, 0);
+  log.info(`tier ${tier}: ${total} windows across ${surfaced.size} films`);
 }
 
 function runClaudeOnce(prompt: string): Promise<string> {
@@ -171,14 +225,25 @@ async function invoke(payload: unknown): Promise<{ reply: string; model: string 
   return { reply: envelope.result, model: model ?? args.model! };
 }
 
+interface WindowItem {
+  windowId: string;
+  movieId: number;
+  startSeq: number;
+  endSeq: number;
+  lines: Array<{ seq: number; text: string }>;
+}
+
 interface PendingFilm {
   movieId: number;
   hash: string;
   lines: Utterance[];
+  windows: WindowItem[];
 }
 
 // Films stream grouped by movieId, so one film is buffered at a time while
-// collecting; only films that actually need a run are retained.
+// collecting; only films that actually need a run are retained. Scene-summary
+// films keep just the window slices that need generating, not the transcript:
+// a corpus-wide run must not hold 3.7M lines in memory.
 const pending: PendingFilm[] = [];
 let skipped = 0;
 let current: Utterance[] = [];
@@ -186,19 +251,31 @@ let currentId = -1;
 
 function takeFilm(): void {
   if (current.length === 0 || pending.length >= filmLimit) return;
-  const hash = inputHash(current.map((u) => u.text));
-  const upToDate =
-    kind === 'five-quotes'
-      ? !needsRun(existing.get(String(currentId)), hash, promptVersion)
-      : windows(current, Number(args.windows ?? 3)).every((w) => {
-          const id = `${currentId}:${w[0]!.seq}-${w[w.length - 1]!.seq}`;
-          return !needsRun(existing.get(id), inputHash(w.map((u) => u.text)), promptVersion);
-        });
-  if (upToDate) {
+  if (kind === 'five-quotes') {
+    const hash = inputHash(current.map((u) => u.text));
+    if (!needsRun(existing.get(String(currentId)), hash, promptVersion)) {
+      skipped += 1;
+      return;
+    }
+    pending.push({ movieId: currentId, hash, lines: current, windows: [] });
+    return;
+  }
+  const needed: WindowItem[] = [];
+  for (const w of surfaced.get(currentId) ?? []) {
+    const lines = current
+      .filter((u) => u.seq >= w.startSeq && u.seq <= w.endSeq)
+      .map((u) => ({ seq: u.seq, text: u.text }));
+    if (lines.length === 0) continue;
+    const windowId = `${currentId}:${w.startSeq}-${w.endSeq}`;
+    if (needsRun(existing.get(windowId), inputHash(lines.map((l) => l.text)), promptVersion)) {
+      needed.push({ windowId, movieId: currentId, startSeq: w.startSeq, endSeq: w.endSeq, lines });
+    }
+  }
+  if (needed.length === 0) {
     skipped += 1;
     return;
   }
-  pending.push({ movieId: currentId, hash, lines: current });
+  pending.push({ movieId: currentId, hash: '', lines: [], windows: needed });
 }
 
 for await (const u of readJsonl<Utterance>(resolve(DATA_DIR, 'utterances.jsonl'))) {
@@ -219,11 +296,12 @@ let dropped = 0;
 let unanswered = 0;
 let lintFailed = 0;
 
+if (kind === 'five-quotes') {
 for (let at = 0; at < pending.length; at += BATCH) {
   const batch = pending.slice(at, at + BATCH);
   const rows: unknown[] = [];
 
-  if (kind === 'five-quotes') {
+  {
     const payload = batch.map((f) => ({
       movieId: f.movieId,
       title: byId.get(f.movieId)?.title,
@@ -279,27 +357,23 @@ for (let at = 0; at < pending.length; at += BATCH) {
         canonicalConfidence: draftIds.has(film.movieId) ? 'low' : 'normal',
       });
     }
-  } else {
-    const windowCount = Number(args.windows ?? 3);
-    const items = batch
-      .flatMap((f) =>
-        windows(f.lines, windowCount).map((w) => ({
-          windowId: `${f.movieId}:${w[0]!.seq}-${w[w.length - 1]!.seq}`,
-          movieId: f.movieId,
-          title: byId.get(f.movieId)?.title,
-          year: byId.get(f.movieId)?.year,
-          startSeq: w[0]!.seq,
-          endSeq: w[w.length - 1]!.seq,
-          lines: w.map((u) => ({ seq: u.seq, text: u.text })),
-        })),
-      )
-      .filter((item) =>
-        needsRun(
-          existing.get(item.windowId),
-          inputHash(item.lines.map((l) => l.text)),
-          promptVersion,
-        ),
-      );
+  }
+
+  await appendFile(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  log.info(`batch ${at / BATCH + 1}/${Math.ceil(pending.length / BATCH)}: ${rows.length} rows`);
+}
+} else {
+  // Windows batch by count, not by film: a segment span is many times the
+  // size of a five-quotes slate line, and films differ wildly in span count.
+  const allWindows = pending.flatMap((f) => f.windows);
+  log.step(`${allWindows.length} windows to generate`);
+  for (let at = 0; at < allWindows.length; at += WINDOW_BATCH) {
+    const items = allWindows.slice(at, at + WINDOW_BATCH).map((w) => ({
+      ...w,
+      title: byId.get(w.movieId)?.title,
+      year: byId.get(w.movieId)?.year,
+    }));
+    const rows: unknown[] = [];
     const { reply, model } = await invoke(items);
     const parsed =
       extractJson<
@@ -335,10 +409,11 @@ for (let at = 0; at < pending.length; at += BATCH) {
         canonicalConfidence: draftIds.has(item.movieId) ? 'low' : 'normal',
       });
     }
+    await appendFile(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    log.info(
+      `windows ${Math.min(at + WINDOW_BATCH, allWindows.length)}/${allWindows.length}: ${rows.length} rows`,
+    );
   }
-
-  await appendFile(storePath, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
-  log.info(`batch ${at / BATCH + 1}/${Math.ceil(pending.length / BATCH)}: ${rows.length} rows`);
 }
 
 if (kind === 'five-quotes') {
