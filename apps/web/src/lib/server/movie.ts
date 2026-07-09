@@ -290,10 +290,13 @@ async function spanOf(
   const byIdx = idx !== null && table === 'segments';
   const found = await rows(async () => {
     const result = await db.query({
+      // Only beat spans need their vector (they drive the nearest-moment
+      // query); a segment's 768 floats would ride along unread on every
+      // panel request.
       query: byIdx
-        ? `SELECT start_seq, end_seq, '' AS text, vec FROM segments
+        ? `SELECT start_seq, end_seq, '' AS text, []::Array(Float32) AS vec FROM segments
            WHERE movie_id = {id:UInt32} AND idx = {idx:UInt32} LIMIT 1`
-        : `SELECT start_seq, end_seq, ${table === 'beats' ? 'text' : "'' AS text"}, vec
+        : `SELECT start_seq, end_seq, ${table === 'beats' ? 'text, vec' : "'' AS text, []::Array(Float32) AS vec"}
            FROM ${table}
            WHERE movie_id = {id:UInt32} AND start_seq <= {seq:UInt32} AND end_seq >= {seq:UInt32}
            ORDER BY abs(toInt64(start_seq + end_seq) - 2 * {seq:Int64}) ASC
