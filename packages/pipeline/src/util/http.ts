@@ -19,6 +19,18 @@ function keyFor(url: string): string {
   return createHash('sha1').update(url).digest('hex');
 }
 
+/**
+ * Backoff for a throttled response: Retry-After when the server sent one,
+ * else exponential from the attempt count. A missing header must not read as
+ * zero — Number(null) is 0, which silently turned backoff into a busy retry.
+ */
+export function backoffMs(retryAfter: string | null, attempt: number): number {
+  const seconds = retryAfter === null ? NaN : Number(retryAfter);
+  return Number.isFinite(seconds) && seconds > 0
+    ? seconds * 1000
+    : BACKOFF_BASE_MS * 2 ** attempt;
+}
+
 async function readCache(key: string): Promise<string | null> {
   try {
     return await readFile(resolve(TEXT_CACHE, `${key}.html`), 'utf8');
@@ -70,10 +82,7 @@ export async function politeFetchText(url: string): Promise<string | null> {
       if (response.status === 404) return null;
 
       if (response.status === 429 || response.status >= 500) {
-        const retryAfter = Number(response.headers.get('retry-after'));
-        const backoff = Number.isFinite(retryAfter)
-          ? retryAfter * 1000
-          : BACKOFF_BASE_MS * 2 ** attempt;
+        const backoff = backoffMs(response.headers.get('retry-after'), attempt);
         log.warn(`http ${response.status} on ${host}, backing off ${backoff}ms`);
         await sleep(backoff);
         continue;
