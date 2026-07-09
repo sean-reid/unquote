@@ -54,6 +54,8 @@ function visitorFor(event: RequestEvent): string {
   return visitorHash(ip, event.request.headers.get('user-agent') ?? '');
 }
 
+let insertWarned = false;
+
 function insert(table: string, row: Record<string, unknown>): void {
   void db
     .insert({
@@ -62,8 +64,16 @@ function insert(table: string, row: Record<string, unknown>): void {
       format: 'JSONEachRow',
       clickhouse_settings: { async_insert: 1, wait_for_async_insert: 0 },
     })
-    .catch(() => {
-      // Analytics must never break the request path.
+    .catch((error: unknown) => {
+      // Analytics must never break the request path, but a broken sink has
+      // to say so once, or months of writes vanish without a trace.
+      if (!insertWarned) {
+        insertWarned = true;
+        console.warn(
+          `analytics insert into ${table} failing:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
     });
 }
 

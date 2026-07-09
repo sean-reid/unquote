@@ -60,6 +60,16 @@ LINES_COLUMNS='
 
 chq "CREATE TABLE IF NOT EXISTS movies ($MOVIES_COLUMNS) ENGINE = MergeTree ORDER BY id"
 chq "CREATE TABLE IF NOT EXISTS lines ($LINES_COLUMNS) ENGINE = MergeTree ORDER BY (movie_id, seq) SETTINGS index_granularity = 512"
+
+# Analytics tables hold live app writes; created here idempotently (mirroring
+# stages/load.ts) and never part of any swap, so pushes cannot clear them.
+chq "CREATE TABLE IF NOT EXISTS search_log (
+  ts DateTime, query String, query_norm String, hits UInt16, strong UInt16,
+  had_movie UInt8, took_ms UInt16, visitor_hash UInt64
+) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 180 DAY"
+chq "CREATE TABLE IF NOT EXISTS pageviews (
+  ts DateTime, path String, referrer String, visitor_hash UInt64
+) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 180 DAY"
 chq "DROP TABLE IF EXISTS movies_staging"
 chq "DROP TABLE IF EXISTS lines_staging"
 chq "CREATE TABLE movies_staging ($MOVIES_COLUMNS) ENGINE = MergeTree ORDER BY id"
