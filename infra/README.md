@@ -69,6 +69,22 @@ you opt in: set repository secrets `SSH_PRIVATE_KEY` (the deploy key) and
   partial corpus. Analytics tables live outside the swap and survive reloads.
 - Disaster: `UNQUOTE_HOST=root@<new-ip> infra/ops/resurrect.sh` and move DNS.
 
+## Edge cache
+
+Three Cloudflare cache rules (Rulesets API, `http_request_cache_settings`
+phase, managed with `CLOUDFLARE_API_TOKEN` which carries Zone > Cache Rules >
+Edit) shape what the CDN may keep:
+
+- `/_app/immutable/*`: cache, edge TTL one year. The filenames are
+  content-hashed, so a deploy changes the URL rather than the content and no
+  purge is ever needed.
+- `/favicon.svg`, `/favicon-32.png`, `/apple-touch-icon.png`: cache, edge TTL
+  one day.
+- Everything else: never cache. Pageviews are logged server-side for every
+  HTML response and searches inside `/api/search`, so a cached page or API hit
+  would silently drop analytics. This rule makes that constraint structural
+  instead of relying on Cloudflare's defaults.
+
 ## Notes
 
 - ClickHouse is never exposed publicly: port 8123 binds to the server's

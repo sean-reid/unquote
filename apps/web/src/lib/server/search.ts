@@ -85,7 +85,7 @@ async function exactArm(queryNorm: string): Promise<LineRow[]> {
       SELECT l.movie_id AS movie_id, l.seq AS seq, l.arc AS arc, l.text AS text
       FROM lines AS l
       INNER JOIN movies AS m ON m.id = l.movie_id
-      WHERE positionCaseInsensitive(l.text_norm, {q:String}) > 0
+      WHERE position(l.text_norm, {q:String}) > 0
       ORDER BY m.votes DESC, length(l.text_norm) ASC, l.movie_id, l.seq
       LIMIT {limit:UInt32}
     `,
@@ -307,7 +307,7 @@ async function phraseStats(queryNorm: string): Promise<PhraseStats | null> {
         uniqExactMap(map(m.decade, l.movie_id)) AS decade_map
       FROM lines AS l
       INNER JOIN movies AS m ON m.id = l.movie_id
-      WHERE positionCaseInsensitive(l.text_norm, {q:String}) > 0
+      WHERE position(l.text_norm, {q:String}) > 0
     `,
     query_params: { q: queryNorm },
     format: 'JSONEachRow',
