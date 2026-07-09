@@ -32,8 +32,9 @@ APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 EOF
 
-# Firewall: ssh and the web, nothing else.
-ufw allow OpenSSH
+# Firewall: ssh (rate limited; brute-force noise otherwise fills the log)
+# and the web, nothing else.
+ufw limit OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable

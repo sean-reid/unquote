@@ -19,4 +19,5 @@ read -r -p "press enter when infra/.env is in place..."
 
 "$HERE/deploy.sh"
 "$HERE/push-data.sh"
+"$HERE/push-ladder.sh"
 echo "resurrection complete"

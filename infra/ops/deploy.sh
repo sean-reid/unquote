@@ -11,6 +11,7 @@ set -euo pipefail
 cd /opt/unquote
 git fetch origin main
 git reset --hard origin/main
+echo "deploying $(git rev-parse --short HEAD): $(git log -1 --format=%s)"
 cd infra
 test -f .env || { echo "infra/.env missing on server; copy .env.example and fill it in" >&2; exit 1; }
 docker compose -f docker-compose.prod.yml up -d --build
