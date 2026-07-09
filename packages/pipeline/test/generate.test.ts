@@ -97,6 +97,16 @@ describe('lintSummary', () => {
     expect(issues.some((i) => i.kind === 'no-evidence')).toBe(true);
   });
 
+  it('does not flag pronouns or quote-opened capitals as nouns', () => {
+    const issues = lintSummary(
+      'A man pleads. They refuse, saying "Never again." He walks out.',
+      [{ start: 100, end: 101 }],
+      window,
+      'The Godfather',
+    );
+    expect(issues).toEqual([]);
+  });
+
   it('flags proper nouns the window never shows', () => {
     const issues = lintSummary(
       'A man petitions Corleone for justice.',

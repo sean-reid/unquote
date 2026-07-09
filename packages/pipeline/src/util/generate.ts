@@ -153,9 +153,13 @@ export function lintSummary(
     const words = sentence.split(/\s+/);
     words.forEach((word, i) => {
       if (i === 0) return;
-      const m = word.match(/^["'(]*([A-Z][a-z]+)/);
+      // A capital opening or following quoted speech is dialogue casing,
+      // not a name; verbatim quotes ground themselves via the window text.
+      if (/^["'“]/.test(word) || /["'”’]$/.test(words[i - 1] ?? '')) return;
+      const m = word.match(/^\(?([A-Z][a-z]+)/);
       if (!m) return;
       const noun = m[1]!.toLowerCase();
+      if (NOT_NAMES.has(noun)) return;
       if (!known.has(noun)) {
         issues.push({ kind: 'invented-noun', detail: `"${m[1]}" appears nowhere in the window` });
       }
@@ -163,6 +167,12 @@ export function lintSummary(
   }
   return issues;
 }
+
+// Capitalized mid-sentence by quoting or splitter stumbles, never a name.
+const NOT_NAMES = new Set(
+  ('he she it we they you i who what when where why how the a an and but or nor so yet ' +
+    'his her its our their your this that these those there then now no yes not').split(' '),
+);
 
 /** Content hash of the exact texts a generation saw; 16 hex chars is plenty. */
 export function inputHash(texts: string[]): string {
