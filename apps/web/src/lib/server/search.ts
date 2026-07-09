@@ -179,21 +179,97 @@ async function beatsAvailable(): Promise<boolean> {
  * Descriptive queries and lines that split across cues live at exchange
  * width; when nothing matches verbatim, nearby beats fill the gap.
  */
-async function beatsArm(query: string): Promise<BeatRow[]> {
+async function beatsArm(query: string): Promise<Array<BeatRow & { dist: number }>> {
   if (!(await beatsAvailable())) return [];
   const vec = await embedQueryWide(query);
   const result = await db.query({
     query: `
-      SELECT movie_id, start_seq, arc, text
+      SELECT movie_id, start_seq, arc, text,
+             cosineDistance(vec, {vec:Array(Float32)}) AS dist
       FROM beats
-      ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
+      ORDER BY dist ASC
       LIMIT 24
     `,
     query_params: { vec: Array.from(vec) },
     format: 'JSONEachRow',
     clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
   });
-  return (await result.json()) as BeatRow[];
+  return (await result.json()) as Array<BeatRow & { dist: number }>;
+}
+
+let summariesUsable: boolean | null = null;
+
+/** Summary vectors join the search once the table has embedded rows. */
+async function summariesAvailable(): Promise<boolean> {
+  if (summariesUsable !== null) return summariesUsable;
+  try {
+    const result = await db.query({
+      query: 'SELECT length(vec) AS dim FROM summary_vectors LIMIT 1',
+      format: 'JSONEachRow',
+    });
+    const rows = (await result.json()) as Array<{ dim: number }>;
+    summariesUsable = rows[0]?.dim === WIDE_EMBED_DIM;
+  } catch {
+    summariesUsable = null;
+    return false;
+  }
+  return summariesUsable ?? false;
+}
+
+/**
+ * A described scene matches the summary layer in its own register: summaries
+ * are event-phrased the way memories are, where dialogue only shares words
+ * with a memory by luck. Hits come back as the verbatim dialogue of the beat
+ * opening the summarized span, so ranking uses the summary but the screen
+ * only ever shows lines from the film.
+ */
+async function summariesArm(query: string): Promise<Array<BeatRow & { dist: number }>> {
+  if (!(await summariesAvailable())) return [];
+  const vec = await embedQueryWide(query);
+  const result = await db.query({
+    query: `
+      SELECT movie_id, start_seq, end_seq,
+             cosineDistance(vec, {vec:Array(Float32)}) AS dist
+      FROM summary_vectors
+      WHERE movie_id NOT IN (
+        SELECT movie_id FROM movie_quality WHERE non_english = 1 OR downrank = 1
+      )
+      ORDER BY dist ASC
+      LIMIT 24
+    `,
+    query_params: { vec: Array.from(vec) },
+    format: 'JSONEachRow',
+    clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
+  });
+  const spans = (await result.json()) as Array<{
+    movie_id: number;
+    start_seq: number;
+    end_seq: number;
+    dist: number;
+  }>;
+  const byFilm = new Map<number, { start_seq: number; end_seq: number; dist: number }>();
+  for (const span of spans) {
+    if (!byFilm.has(span.movie_id)) byFilm.set(span.movie_id, span);
+  }
+  const films = [...byFilm.entries()].slice(0, 12);
+  const beats = await Promise.all(
+    films.map(async ([movieId, span]) => {
+      const overlap = await db.query({
+        query: `
+          SELECT movie_id, start_seq, arc, text
+          FROM beats
+          WHERE movie_id = {id:UInt32} AND end_seq >= {s:UInt32} AND start_seq <= {e:UInt32}
+          ORDER BY idx ASC
+          LIMIT 1
+        `,
+        query_params: { id: movieId, s: span.start_seq, e: span.end_seq },
+        format: 'JSONEachRow',
+      });
+      const rows = (await overlap.json()) as BeatRow[];
+      return rows[0] ? { ...rows[0], dist: span.dist } : null;
+    }),
+  );
+  return beats.filter((row): row is BeatRow & { dist: number } => row !== null);
 }
 
 interface PhraseRow {
@@ -406,10 +482,16 @@ async function searchInner(query: string): Promise<SearchResponse> {
   if (exact.length === 0) {
     const DESCRIPTIVE_BEAT_WEIGHT = 1.8;
     const MAX_UTTERANCES = 4;
-    const beats = await beatsArm(query);
+    // Beats and summaries embed in the same space against the same query
+    // vector, so their cosine distances are directly comparable: one merged
+    // list ordered by distance, no per-arm weighting. A film the summary
+    // store has not reached yet competes through its beats on equal terms,
+    // which matters while generation is still filling the store.
+    const [beats, summaryBeats] = await Promise.all([beatsArm(query), summariesArm(query)]);
+    const momentRows = [...summaryBeats, ...beats].sort((a, b) => a.dist - b.dist);
     const beatHits: SearchHit[] = [];
     const filmSeen = new Set<number>();
-    for (const [rank, row] of beats.entries()) {
+    for (const [rank, row] of momentRows.entries()) {
       const meta = movieById.get(row.movie_id);
       if (!meta) continue;
       // Overlapping windows make adjacent beats near-duplicates; one per film.

@@ -1,5 +1,12 @@
 [
   {
+    "query": "a boy in leg braces outruns the bullies chasing him",
+    "expectFilm": "forrest gump",
+    "expectInTop": 5,
+    "mustBeInCorpus": true,
+    "note": "scene description in words the dialogue never uses; only the summary layer answers it"
+  },
+  {
     "query": "may the force be with you",
     "expectFilm": "star wars|phantom menace|rogue one|revenge of the sith|attack of the clones",
     "expectInTop": 3,
