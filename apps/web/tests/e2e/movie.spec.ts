@@ -19,6 +19,9 @@ async function chQuery(query: string): Promise<string> {
 let filmId = 0;
 let pairA = 0;
 let pairB = 0;
+let summaryFilm = 0;
+let summaryIdx = '';
+let plainFilm = 0;
 
 test.beforeAll(async () => {
   filmId = Number(
@@ -32,6 +35,24 @@ test.beforeAll(async () => {
   const [a, b] = pair.split('\t').map(Number);
   pairA = a ?? 0;
   pairB = b ?? 0;
+  // A block whose exact span has a generated summary, and a film the summary
+  // store has not reached: the panel must carry both.
+  const summarized = await chQuery(
+    'SELECT s.movie_id, s.idx FROM unquote.segments AS s ' +
+      'INNER JOIN unquote.scene_summaries AS z ON z.movie_id = s.movie_id ' +
+      'AND z.start_seq = s.start_seq AND z.end_seq = s.end_seq ' +
+      'ORDER BY s.movie_id, s.idx LIMIT 1',
+  );
+  const [sFilm, sIdx] = summarized.split('\t');
+  summaryFilm = Number(sFilm ?? 0);
+  summaryIdx = sIdx ?? '';
+  plainFilm = Number(
+    await chQuery(
+      'SELECT movie_id FROM unquote.segments WHERE movie_id NOT IN ' +
+        '(SELECT movie_id FROM unquote.scene_summaries) AND movie_id IN ' +
+        '(SELECT movie_id FROM unquote.five_lines) ORDER BY movie_id DESC LIMIT 1',
+    ),
+  );
 });
 
 test.beforeEach(() => {
@@ -49,7 +70,7 @@ test('a movie page shows five lines and the timeline', async ({ page }, testInfo
   });
 });
 
-test('the dial switches width without another request', async ({ page }) => {
+test('one selection fills the whole panel with one request', async ({ page }) => {
   let neighborCalls = 0;
   await page.route('**/api/movie/*/neighbors*', async (route) => {
     neighborCalls += 1;
@@ -57,42 +78,44 @@ test('the dial switches width without another request', async ({ page }) => {
   });
   await page.goto(`/movie/${filmId}`);
   await page.locator('.block').first().click();
-  await expect(page.locator('.dial')).toBeVisible();
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('.this-part')).toBeVisible();
   await expect(page.locator('.neighbor').first()).toBeVisible();
-  for (const label of ['Exact line', 'Scene', 'Whole movie', 'Exchange']) {
-    await page.getByRole('radio', { name: label }).click();
-  }
-  await expect(page.locator('.panel')).toBeVisible();
   expect(neighborCalls).toBe(1);
 });
 
-test('the dial never wraps', async ({ page }) => {
-  await page.goto(`/movie/${filmId}`);
-  await page.locator('.block').first().click();
-  await expect(page.locator('.dial')).toBeVisible();
-  const tops = await page
-    .locator('.dial button')
-    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
-  expect(new Set(tops.map((t) => Math.round(t))).size).toBe(1);
+test('a summarized scene leads with its headline, dialogue behind the expander', async ({
+  page,
+}) => {
+  test.skip(summaryFilm === 0, 'no scene summaries loaded yet');
+  await page.goto(`/movie/${summaryFilm}`);
+  await page.locator(`.block[data-idx="${summaryIdx}"]`).click();
+  await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  await expect(page.locator('.headline')).toBeVisible();
+  await expect(page.locator('.summary')).toBeVisible();
+  // The summary carries the panel; the dialogue waits behind the expander.
+  await expect(page.locator('.this-part .sub-line')).toHaveCount(0);
+  const expander = page.locator('.expander');
+  await expect(expander).toHaveText('read the dialogue');
+  await expander.click();
+  await expect(page.locator('.this-part .sub-line').first()).toBeVisible();
+  await expander.click();
+  await expect(page.locator('.this-part .sub-line')).toHaveCount(0);
 });
 
-test('the selected part shows at each width', async ({ page }) => {
-  await page.goto(`/movie/${filmId}`);
+test('a scene the summaries have not reached shows its dialogue plainly', async ({ page }) => {
+  test.skip(plainFilm === 0, 'every segmented film already has summaries');
+  await page.goto(`/movie/${plainFilm}`);
   await page.locator('.block').first().click();
   await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
-  // Exchange is the default width: the part is the whole exchange.
+  await expect(page.locator('.headline')).toHaveCount(0);
   await expect(page.locator('.this-part .sub-line').first()).toBeVisible();
-  await page.getByRole('radio', { name: 'Exact line' }).click();
-  await expect(page.locator('.this-part .sub-line')).toHaveCount(1);
-  await page.getByRole('radio', { name: 'Scene' }).click();
   const compact = await page.locator('.this-part .sub-line').count();
   const expander = page.locator('.expander');
   if (await expander.count()) {
     await expander.click();
     expect(await page.locator('.this-part .sub-line').count()).toBeGreaterThan(compact);
   }
-  await page.getByRole('radio', { name: 'Whole movie' }).click();
-  await expect(page.locator('.this-part')).toHaveCount(0);
 });
 
 test('the far edge of the strip selects the last part', async ({ page }) => {

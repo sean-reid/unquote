@@ -1,23 +1,14 @@
 <script lang="ts">
-  import type { ContextLevel } from '@unquote/shared';
   import { resolve } from '$app/paths';
-  import type { ExpandableNeighbor, NeighborPayload } from '$lib/server/movie.js';
+  import type { ExpandableNeighbor, ScenePanel } from '$lib/server/movie.js';
   import type { PageData } from './$types.js';
 
   let { data }: { data: PageData } = $props();
 
-  const DIAL: Array<{ level: ContextLevel; label: string; full: string }> = [
-    { level: 'line', label: 'Line', full: 'Exact line' },
-    { level: 'beat', label: 'Exchange', full: 'Exchange' },
-    { level: 'segment', label: 'Scene', full: 'Scene' },
-    { level: 'movie', label: 'Movie', full: 'Whole movie' },
-  ];
-
   const SOURCE_PREVIEW_LINES = 4;
 
   let selectedSeq = $state<number | null>(null);
-  let levels = $state<NeighborPayload | null>(null);
-  let level = $state<ContextLevel>('beat');
+  let panel = $state<ScenePanel | null>(null);
   let loading = $state(false);
   let expanded = $state(false);
   let expandedNeighbor = $state<string | null>(null);
@@ -28,7 +19,7 @@
   /** Mobile sheet: expanded shows the panel, docked leaves the handle peeking. */
   let sheet = $state<'expanded' | 'docked'>('expanded');
 
-  const shown = $derived<ExpandableNeighbor[]>(levels ? levels[level] : []);
+  const moments = $derived<ExpandableNeighbor[]>(panel ? panel.moments : []);
   // Windows overlap, so identity beats containment: an explicit idx wins, and
   // deep links fall back to the container whose midpoint is nearest.
   const selectedSegment = $derived.by(() => {
@@ -45,20 +36,15 @@
     return containers[0] ?? null;
   });
 
-  /** The selected part's own text at the active level; none at movie width. */
-  const sourceLines = $derived.by<string[]>(() => {
-    const source = levels?.source;
-    if (!source) return [];
-    if (level === 'line') return [source.line.text];
-    if (level === 'beat') return source.beat?.lines ?? [];
-    if (level === 'segment') return source.segment?.lines ?? [];
-    return [];
+  /** The scene's dialogue: shown compact without a summary, behind the
+   * expander when the summary carries the panel. */
+  const evidenceLines = $derived<string[]>(panel?.evidence.lines ?? []);
+  const evidenceTotal = $derived(panel?.evidence.totalLines ?? 0);
+  const evidenceShown = $derived.by<string[]>(() => {
+    if (panel?.summary) return expanded ? evidenceLines : [];
+    return expanded ? evidenceLines : evidenceLines.slice(0, SOURCE_PREVIEW_LINES);
   });
-  const sourceTotal = $derived(
-    level === 'segment' ? (levels?.source.segment?.totalLines ?? 0) : sourceLines.length,
-  );
-  const sourceShown = $derived(expanded ? sourceLines : sourceLines.slice(0, SOURCE_PREVIEW_LINES));
-  const sourceCapped = $derived(expanded && sourceTotal > sourceLines.length);
+  const evidenceCapped = $derived(expanded && evidenceTotal > evidenceLines.length);
 
   let selectedIdx = $state<number | null>(null);
 
@@ -67,14 +53,14 @@
     selectedIdx = idx;
     sheet = 'expanded';
     loading = true;
-    levels = null;
+    panel = null;
     expanded = false;
     expandedNeighbor = null;
     dragY = 0;
     try {
       const suffix = idx === null ? '' : `&segment=${idx}`;
       const response = await fetch(`/api/movie/${data.movie.id}/neighbors?seq=${seq}${suffix}`);
-      if (response.ok) levels = (await response.json()) as NeighborPayload;
+      if (response.ok) panel = (await response.json()) as ScenePanel;
     } finally {
       loading = false;
     }
@@ -248,7 +234,7 @@
     navKey = next;
     selectedSeq = null;
     selectedIdx = null;
-    levels = null;
+    panel = null;
     expanded = false;
     expandedNeighbor = null;
     dragY = 0;
@@ -273,7 +259,7 @@
   <meta
     name="description"
     content="Every line of {data.movie.title} ({data.movie
-      .year}): its five defining quotes, and what the rest of cinema its moments resemble."
+      .year}): its five defining quotes, and what each of its scenes reminds the library of."
   />
 </svelte:head>
 
@@ -360,10 +346,9 @@
       class="panel"
       class:dragging
       data-state={loading ? 'loading' : 'ready'}
-      data-level={level}
       data-sheet={sheet}
       style:--drag-y="{dragY}px"
-      aria-label="The selected moment and similar moments in other films"
+      aria-label="The selected scene and similar moments in other films"
     >
       <button
         class="handle"
@@ -378,115 +363,87 @@
         <span></span>
       </button>
 
-      <div class="dial" role="radiogroup" aria-label="How wide to match">
-        {#each DIAL as option (option.level)}
-          <button
-            role="radio"
-            aria-checked={level === option.level}
-            aria-label={option.full}
-            class:active={level === option.level}
-            onclick={() => {
-              level = option.level;
-              expanded = false;
-              expandedNeighbor = null;
-            }}
-          >
-            {option.label}
-          </button>
-        {/each}
-      </div>
-
       {#if loading}
         <p class="panel-note">Looking across the library...</p>
       {:else}
-        {#if level !== 'movie' && sourceLines.length > 0}
+        {#if evidenceLines.length > 0}
           <div class="this-part">
             <p class="part-label">
-              This part
-              {#if levels}
-                <span class="arc">{pct(levels.source.line.arc)} through</span>
+              This scene
+              {#if selectedSegment}
+                <span class="arc">{pct(selectedSegment.arc)} through</span>
               {/if}
             </p>
+            {#if panel?.summary}
+              <h3 class="headline">{panel.summary.headline}</h3>
+              <p class="summary">{panel.summary.summary}</p>
+            {/if}
             <div class="sub-lines">
-              {#each sourceShown as text, i (i)}
+              {#each evidenceShown as text, i (i)}
                 <p class="sub-line">{text}</p>
               {/each}
             </div>
-            {#if sourceLines.length > SOURCE_PREVIEW_LINES}
+            {#if panel?.summary || evidenceLines.length > SOURCE_PREVIEW_LINES}
               <button class="expander" onclick={() => (expanded = !expanded)}>
-                {expanded ? 'show less' : `show all ${sourceTotal} lines`}
+                {#if panel?.summary}
+                  {expanded ? 'hide the dialogue' : 'read the dialogue'}
+                {:else}
+                  {expanded ? 'show less' : `show all ${evidenceTotal} lines`}
+                {/if}
               </button>
             {/if}
-            {#if sourceCapped}
-              <p class="capped">first {sourceLines.length} of {sourceTotal} lines</p>
+            {#if evidenceCapped}
+              <p class="capped">first {evidenceLines.length} of {evidenceTotal} lines</p>
             {/if}
           </div>
         {/if}
 
         <p class="reminds-label">Reminds the library of</p>
-        {#if shown.length === 0}
-          <p class="panel-note">Nothing close enough at this width.</p>
+        {#if moments.length === 0}
+          <p class="panel-note">Nothing close enough.</p>
         {:else}
           <ol class="neighbors">
-            {#each shown as neighbor (neighborKey(neighbor))}
+            {#each moments as neighbor (neighborKey(neighbor))}
               <li class="neighbor" class:open={expandedNeighbor === neighborKey(neighbor)}>
-                {#if level === 'movie'}
-                  <a class="neighbor-row" href="{resolve('/')}movie/{neighbor.movieId}">
-                    {#if posterUrl(neighbor.posterPath)}
-                      <img src={posterUrl(neighbor.posterPath)} alt="" width="46" height="69" />
-                    {:else}
-                      <span class="poster-blank"></span>
-                    {/if}
-                    <span class="neighbor-body">
-                      <span class="meta">
-                        <strong>{neighbor.title}</strong>
-                        <span class="year">({neighbor.year})</span>
-                      </span>
-                    </span>
-                  </a>
-                {:else}
-                  <button
-                    class="neighbor-row"
-                    aria-expanded={expandedNeighbor === neighborKey(neighbor)}
-                    onclick={() => toggleNeighbor(neighborKey(neighbor))}
-                  >
-                    {#if posterUrl(neighbor.posterPath)}
-                      <img src={posterUrl(neighbor.posterPath)} alt="" width="46" height="69" />
-                    {:else}
-                      <span class="poster-blank"></span>
-                    {/if}
-                    <span class="neighbor-body">
-                      {#if neighbor.excerpt && level === 'line'}
-                        <blockquote>{neighbor.excerpt}</blockquote>
-                      {:else if neighbor.excerpt}
-                        <span class="sub-lines">
-                          {#each excerptList(neighbor.excerpt) as text, i (i)}
-                            <p class="sub-line">{text}</p>
-                          {/each}
-                        </span>
-                      {/if}
-                      <span class="meta">
-                        <strong>{neighbor.title}</strong>
-                        <span class="year">({neighbor.year})</span>
-                        <span class="arc">{pct(neighbor.arc)} through</span>
-                      </span>
-                    </span>
-                  </button>
-                  {#if expandedNeighbor === neighborKey(neighbor) && neighbor.expandedLines.length > 0}
-                    <div class="neighbor-more">
-                      <div class="sub-lines">
-                        {#each neighbor.expandedLines as text, i (i)}
+                <button
+                  class="neighbor-row"
+                  aria-expanded={expandedNeighbor === neighborKey(neighbor)}
+                  onclick={() => toggleNeighbor(neighborKey(neighbor))}
+                >
+                  {#if posterUrl(neighbor.posterPath)}
+                    <img src={posterUrl(neighbor.posterPath)} alt="" width="46" height="69" />
+                  {:else}
+                    <span class="poster-blank"></span>
+                  {/if}
+                  <span class="neighbor-body">
+                    {#if neighbor.excerpt}
+                      <span class="sub-lines">
+                        {#each excerptList(neighbor.excerpt) as text, i (i)}
                           <p class="sub-line">{text}</p>
                         {/each}
-                      </div>
-                      <a
-                        class="open-film"
-                        href="{resolve('/')}movie/{neighbor.movieId}?seq={neighbor.startSeq}"
-                      >
-                        Open in {neighbor.title}
-                      </a>
+                      </span>
+                    {/if}
+                    <span class="meta">
+                      <strong>{neighbor.title}</strong>
+                      <span class="year">({neighbor.year})</span>
+                      <span class="arc">{pct(neighbor.arc)} through</span>
+                    </span>
+                  </span>
+                </button>
+                {#if expandedNeighbor === neighborKey(neighbor) && neighbor.expandedLines.length > 0}
+                  <div class="neighbor-more">
+                    <div class="sub-lines">
+                      {#each neighbor.expandedLines as text, i (i)}
+                        <p class="sub-line">{text}</p>
+                      {/each}
                     </div>
-                  {/if}
+                    <a
+                      class="open-film"
+                      href="{resolve('/')}movie/{neighbor.movieId}?seq={neighbor.startSeq}"
+                    >
+                      Open in {neighbor.title}
+                    </a>
+                  </div>
                 {/if}
               </li>
             {/each}
@@ -695,30 +652,18 @@
     margin: 0 auto;
   }
 
-  .dial {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: var(--space-1);
-    margin-bottom: var(--space-3);
+  .headline {
+    font-family: var(--font-quote);
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 var(--space-1);
   }
 
-  .dial button {
-    border: 1px solid var(--border);
-    background: none;
+  .summary {
+    margin: 0 0 var(--space-1);
     color: var(--text-muted);
-    border-radius: 999px;
-    padding: var(--space-1) 0;
-    font: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-    min-height: 36px;
-    white-space: nowrap;
-  }
-
-  .dial button.active {
-    background: var(--accent);
-    color: var(--accent-contrast);
-    border-color: var(--accent);
+    font-size: 0.95rem;
+    line-height: 1.5;
   }
 
   .this-part {
@@ -802,8 +747,7 @@
 
   /* The preview replaces the teaser: while open, the row keeps only the film
      identity and the expansion carries the text once. */
-  .neighbor.open .neighbor-row .sub-lines,
-  .neighbor.open .neighbor-row blockquote {
+  .neighbor.open .neighbor-row .sub-lines {
     display: none;
   }
 
@@ -852,11 +796,6 @@
 
   .neighbor-body {
     min-width: 0;
-  }
-
-  .neighbor blockquote {
-    font-size: 0.95rem;
-    margin-bottom: var(--space-1);
   }
 
   .neighbor-more .sub-line {

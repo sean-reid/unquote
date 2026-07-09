@@ -1,5 +1,5 @@
 import { error, json } from '@sveltejs/kit';
-import { neighborLevels } from '$lib/server/movie.js';
+import { scenePanel } from '$lib/server/movie.js';
 import type { RequestHandler } from './$types.js';
 
 export const GET: RequestHandler = async ({ params, url, setHeaders }) => {
@@ -13,8 +13,8 @@ export const GET: RequestHandler = async ({ params, url, setHeaders }) => {
   if (segmentIdx !== null && (!Number.isInteger(segmentIdx) || segmentIdx < 0)) {
     error(400, 'segment must be a non-negative integer');
   }
-  const levels = await neighborLevels(id, seq, segmentIdx);
-  if (!levels) error(404, 'no such line');
+  const panel = await scenePanel(id, seq, segmentIdx);
+  if (!panel) error(404, 'no such line');
   setHeaders({ 'cache-control': 'public, max-age=300' });
-  return json(levels);
+  return json(panel);
 };

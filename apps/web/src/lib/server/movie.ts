@@ -1,4 +1,4 @@
-import type { MomentNeighbor, NeighborLevels } from '@unquote/shared';
+import type { MomentNeighbor } from '@unquote/shared';
 import { db } from './db.js';
 
 export interface MovieHeader {
@@ -224,26 +224,6 @@ async function hydrate(rows: BareNeighborRow[]): Promise<ExpandableNeighbor[]> {
   });
 }
 
-async function nearestLines(id: number, vec: number[]): Promise<ExpandableNeighbor[]> {
-  const result = await db.query({
-    query: `
-      SELECT movie_id, arc, seq AS start_seq, text AS excerpt,
-             1 - cosineDistance(vec, {vec:Array(Float32)}) AS score
-      FROM lines
-      WHERE movie_id != {id:UInt32}
-        AND movie_id NOT IN (SELECT movie_id FROM movie_quality WHERE non_english = 1)
-      ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
-      LIMIT 16
-    `,
-    query_params: { id, vec },
-    format: 'JSONEachRow',
-    clickhouse_settings: HNSW,
-  });
-  const neighbors = dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
-  await fillWindows(neighbors, 12);
-  return neighbors;
-}
-
 /** First lines of a newline-joined text, breaks preserved for subtitle rendering. */
 function excerptLines(text: string, lines = EXCERPT_LINES): string {
   return clip(text.split('\n').slice(0, lines).join('\n'));
@@ -272,62 +252,6 @@ async function nearestBeats(id: number, vec: number[]): Promise<ExpandableNeighb
   return neighbors;
 }
 
-async function nearestSegments(id: number, vec: number[]): Promise<ExpandableNeighbor[]> {
-  const result = await db.query({
-    query: `
-      SELECT movie_id, arc, start_seq, '' AS excerpt,
-             1 - cosineDistance(vec, {vec:Array(Float32)}) AS score
-      FROM segments
-      WHERE movie_id != {id:UInt32}
-        AND movie_id NOT IN (SELECT movie_id FROM movie_quality WHERE non_english = 1 OR downrank = 1)
-      ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
-      LIMIT 16
-    `,
-    query_params: { id, vec },
-    format: 'JSONEachRow',
-    clickhouse_settings: HNSW,
-  });
-  const neighbors = dedupeByFilm(await hydrate((await result.json()) as BareNeighborRow[]), 8);
-  await fillWindows(neighbors, SOURCE_MAX_LINES);
-  return neighbors;
-}
-
-/** One batched query fills each neighbor's preview window and collapsed excerpt. */
-async function fillWindows(neighbors: ExpandableNeighbor[], window: number): Promise<void> {
-  if (neighbors.length === 0) return;
-  const clauses = neighbors
-    .map((_, i) => `(movie_id = {m${i}:UInt32} AND seq >= {s${i}:UInt32} AND seq < {e${i}:UInt32})`)
-    .join(' OR ');
-  const params: Record<string, number> = {};
-  neighbors.forEach((n, i) => {
-    params[`m${i}`] = n.movieId;
-    params[`s${i}`] = n.startSeq;
-    params[`e${i}`] = n.startSeq + window;
-  });
-  const result = await db.query({
-    query: `SELECT movie_id, seq, text FROM lines WHERE ${clauses} ORDER BY movie_id, seq`,
-    query_params: params,
-    format: 'JSONEachRow',
-  });
-  const lines = (await result.json()) as Array<{ movie_id: number; seq: number; text: string }>;
-  for (const neighbor of neighbors) {
-    // Constrain by seq range too: two neighbors from the same film must not
-    // share one merged window.
-    const own = lines
-      .filter(
-        (l) =>
-          l.movie_id === neighbor.movieId &&
-          l.seq >= neighbor.startSeq &&
-          l.seq < neighbor.startSeq + window,
-      )
-      .map((l) => l.text);
-    neighbor.expandedLines = own.slice(0, SOURCE_MAX_LINES);
-    if (neighbor.excerpt === '' || window > EXCERPT_LINES) {
-      neighbor.excerpt = clip(own.slice(0, EXCERPT_LINES).join('\n'));
-    }
-  }
-}
-
 /** One neighbor per film, best first; variety beats near-duplicates in a short list. */
 function dedupeByFilm(neighbors: ExpandableNeighbor[], keep: number): ExpandableNeighbor[] {
   const seen = new Set<number>();
@@ -340,33 +264,6 @@ function dedupeByFilm(neighbors: ExpandableNeighbor[], keep: number): Expandable
   }
   return out;
 }
-
-async function movieNeighbors(id: number): Promise<ExpandableNeighbor[]> {
-  const similar = await similarMovies(id);
-  return similar.map((s) => ({
-    movieId: s.movieId,
-    title: s.title,
-    year: s.year,
-    posterPath: s.posterPath,
-    arc: 0,
-    excerpt: '',
-    startSeq: 0,
-    score: s.score,
-    expandedLines: [],
-  }));
-}
-
-/** The selected part itself, rendered at each ladder level. */
-export interface SourceContext {
-  /** The block's most distinctive line; also the line-level query subject. */
-  line: { seq: number; arc: number; text: string };
-  beat: { startSeq: number; lines: string[] } | null;
-  segment: { startSeq: number; lines: string[]; totalLines: number } | null;
-}
-
-export type NeighborPayload = {
-  [Level in keyof NeighborLevels]: ExpandableNeighbor[];
-} & { source: SourceContext };
 
 /** Hard bound on how much of a scene one request may reveal. */
 const SOURCE_MAX_LINES = 25;
@@ -409,65 +306,6 @@ async function spanOf(
   return found[0] ?? null;
 }
 
-interface DistinctiveRow {
-  seq: number;
-  arc: number;
-  text: string;
-  vec: number[];
-}
-
-/**
- * The line of the span closest to the span's own line-vector centroid: the
- * block's most representative moment, shown as the subject and queried at
- * line width so the user compares against exactly what they see. Segment
- * vectors live in the 768d beat space, so representativeness is computed
- * natively in the 384d line space instead.
- */
-async function distinctiveLine(
-  id: number,
-  seq: number,
-  span: SpanRow | null,
-): Promise<DistinctiveRow | null> {
-  if (span) {
-    const centroidRows = await rows(async () => {
-      const result = await db.query({
-        query: `SELECT avgForEach(vec) AS centroid FROM lines
-                WHERE movie_id = {id:UInt32} AND seq >= {s:UInt32} AND seq <= {e:UInt32}`,
-        query_params: { id, s: span.start_seq, e: span.end_seq },
-        format: 'JSONEachRow',
-      });
-      return (await result.json()) as Array<{ centroid: number[] }>;
-    });
-    const centroid = centroidRows[0]?.centroid;
-    if (centroid && centroid.length > 0) {
-      const found = await rows(async () => {
-        const result = await db.query({
-          query: `
-            SELECT seq, arc, text, vec FROM lines
-            WHERE movie_id = {id:UInt32} AND seq >= {s:UInt32} AND seq <= {e:UInt32}
-            ORDER BY cosineDistance(vec, {vec:Array(Float32)}) ASC
-            LIMIT 1
-          `,
-          query_params: { id, s: span.start_seq, e: span.end_seq, vec: centroid },
-          format: 'JSONEachRow',
-        });
-        return (await result.json()) as DistinctiveRow[];
-      });
-      if (found[0]) return found[0];
-    }
-  }
-  const fallback = await rows(async () => {
-    const result = await db.query({
-      query:
-        'SELECT seq, arc, text, vec FROM lines WHERE movie_id = {id:UInt32} AND seq = {seq:UInt32} LIMIT 1',
-      query_params: { id, seq },
-      format: 'JSONEachRow',
-    });
-    return (await result.json()) as DistinctiveRow[];
-  });
-  return fallback[0] ?? null;
-}
-
 async function segmentSourceLines(
   id: number,
   span: SpanRow,
@@ -486,52 +324,92 @@ async function segmentSourceLines(
   return { lines: found.map((r) => r.text), totalLines: span.end_seq - span.start_seq + 1 };
 }
 
-/** All four dial levels for one scrub position, one request. */
-export async function neighborLevels(
+export interface SceneSummary {
+  headline: string;
+  summary: string;
+}
+
+/** What the panel shows for one selected scene. */
+export interface ScenePanel {
+  /** Generated scene summary; null until the store covers this scene. */
+  summary: SceneSummary | null;
+  /** The scene's own dialogue, capped server-side. */
+  evidence: { lines: string[]; totalLines: number };
+  moments: ExpandableNeighbor[];
+}
+
+/**
+ * Summaries are keyed by the exact segment span they were generated from;
+ * a scene the store has not reached yet simply has no row.
+ */
+async function sceneSummary(
+  id: number,
+  startSeq: number,
+  endSeq: number,
+): Promise<SceneSummary | null> {
+  const found = await rows(async () => {
+    const result = await db.query({
+      query: `
+        SELECT headline, summary FROM scene_summaries
+        WHERE movie_id = {id:UInt32} AND start_seq = {s:UInt32} AND end_seq = {e:UInt32}
+        LIMIT 1
+      `,
+      query_params: { id, s: startSeq, e: endSeq },
+      format: 'JSONEachRow',
+    });
+    return (await result.json()) as SceneSummary[];
+  });
+  return found[0] ?? null;
+}
+
+/**
+ * One selected scene, one request: its summary when generated, its dialogue
+ * as evidence, and the closest moments across the library. Moments match at
+ * beat width, the sharpest signal the ladder has (segment vectors average
+ * a whole scene into mush; bridges use beats for the same reason).
+ */
+export async function scenePanel(
   id: number,
   seq: number,
   segmentIdx: number | null = null,
-): Promise<NeighborPayload | null> {
+): Promise<ScenePanel | null> {
   const started = Date.now();
-  const stage = (label: string, from: number) =>
-    console.log(`neighbors/${label}: ${Date.now() - from}ms`);
-
-  const vecsFrom = Date.now();
   const segmentSpan = await spanOf('segments', id, seq, segmentIdx);
   // Inside an explicit block selection, the beat is the one at its center.
   const beatSeq = segmentSpan ? Math.floor((segmentSpan.start_seq + segmentSpan.end_seq) / 2) : seq;
   const beatSpan = await spanOf('beats', id, segmentIdx !== null ? beatSeq : seq);
-  const subject = await distinctiveLine(id, seq, segmentSpan);
-  stage('vectors', vecsFrom);
-  if (!subject) return null;
 
-  const timed = async (label: string, run: () => Promise<ExpandableNeighbor[]>) => {
-    const from = Date.now();
-    const out = await rows(run);
-    stage(label, from);
-    return out;
-  };
-  const [line, beat, segment, movie, segmentSource] = await Promise.all([
-    timed('line', () => nearestLines(id, subject.vec)),
-    beatSpan ? timed('beat', () => nearestBeats(id, beatSpan.vec)) : Promise.resolve([]),
+  const [summary, moments, segmentSource, lineRows] = await Promise.all([
     segmentSpan
-      ? timed('segment', () => nearestSegments(id, segmentSpan.vec))
-      : Promise.resolve([]),
-    timed('movie', () => movieNeighbors(id)),
+      ? sceneSummary(id, segmentSpan.start_seq, segmentSpan.end_seq)
+      : Promise.resolve(null),
+    beatSpan ? rows(() => nearestBeats(id, beatSpan.vec)) : Promise.resolve([]),
     segmentSpan ? segmentSourceLines(id, segmentSpan) : Promise.resolve(null),
+    segmentSpan || beatSpan
+      ? Promise.resolve([])
+      : rows(async () => {
+          const result = await db.query({
+            query:
+              'SELECT text FROM lines WHERE movie_id = {id:UInt32} AND seq = {seq:UInt32} LIMIT 1',
+            query_params: { id, seq },
+            format: 'JSONEachRow',
+          });
+          return (await result.json()) as Array<{ text: string }>;
+        }),
   ]);
 
-  const source: SourceContext = {
-    line: { seq: subject.seq, arc: subject.arc, text: subject.text },
-    beat: beatSpan
-      ? { startSeq: beatSpan.start_seq, lines: beatSpan.text.split('\n').filter(Boolean) }
-      : null,
-    segment:
-      segmentSpan && segmentSource ? { startSeq: segmentSpan.start_seq, ...segmentSource } : null,
-  };
+  const evidence = segmentSource
+    ? { lines: segmentSource.lines, totalLines: segmentSource.totalLines }
+    : beatSpan
+      ? (() => {
+          const lines = beatSpan.text.split('\n').filter(Boolean);
+          return { lines, totalLines: lines.length };
+        })()
+      : { lines: lineRows.map((r) => r.text), totalLines: lineRows.length };
+  if (evidence.lines.length === 0) return null;
 
-  console.log(`neighbors: movie ${id} seq ${seq} in ${Date.now() - started}ms`);
-  return { line, beat, segment, movie, source };
+  console.log(`panel: movie ${id} seq ${seq} in ${Date.now() - started}ms`);
+  return { summary, evidence, moments };
 }
 
 /**
