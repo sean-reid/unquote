@@ -47,6 +47,10 @@
   const evidenceCapped = $derived(expanded && evidenceTotal > evidenceLines.length);
 
   let selectedIdx = $state<number | null>(null);
+  // Scrub-clicks and arrow presses can outrun the network; only the newest
+  // request may write the panel, or a slow early response overwrites a fast
+  // late one.
+  let panelRequest = 0;
 
   async function select(seq: number, idx: number | null = null) {
     selectedSeq = seq;
@@ -58,13 +62,29 @@
     summaryOpen = false;
     expandedNeighbor = null;
     dragY = 0;
+    revealPanel();
+    const request = ++panelRequest;
     try {
       const suffix = idx === null ? '' : `&segment=${idx}`;
       const response = await fetch(`/api/movie/${data.movie.id}/neighbors?seq=${seq}${suffix}`);
-      if (response.ok) panel = (await response.json()) as ScenePanel;
+      if (response.ok && request === panelRequest) panel = (await response.json()) as ScenePanel;
     } finally {
-      loading = false;
+      if (request === panelRequest) loading = false;
     }
+  }
+
+  // On desktop the panel sits inline below the scrubber; selecting from the
+  // five-lines list at the top of the page would otherwise happen entirely
+  // below the fold. The mobile sheet is fixed and needs no scroll.
+  function revealPanel() {
+    if (typeof window === 'undefined') return;
+    if (!window.matchMedia('(min-width: 769px)').matches) return;
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    requestAnimationFrame(() => {
+      document
+        .querySelector('.panel')
+        ?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'nearest' });
+    });
   }
 
   function dock() {
@@ -160,6 +180,38 @@
     if (event.target !== event.currentTarget) return; // a block owns this click
     const segment = segmentAtX(event.currentTarget as HTMLElement, event.clientX);
     void select(segment.startSeq, segment.idx);
+  }
+
+  // The strip is a tablist: one tab stop, arrows walk the moments. Without
+  // this, every block is a stop and the keyboard crosses forty of them to
+  // reach the panel.
+  function onScrubKey(event: KeyboardEvent) {
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const segments = data.segments;
+    const current = selectedSegment
+      ? segments.findIndex((s) => s.idx === selectedSegment.idx)
+      : -1;
+    const target =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? segments.length - 1
+          : event.key === 'ArrowLeft'
+            ? Math.max(current - 1, 0)
+            : Math.min(current + 1, segments.length - 1);
+    const segment = segments[target];
+    if (!segment || segment.idx === selectedSegment?.idx) return;
+    void select(segment.startSeq, segment.idx);
+    (event.currentTarget as HTMLElement)
+      .querySelector<HTMLElement>(`.block[data-idx="${segment.idx}"]`)
+      ?.focus();
+  }
+
+  function blockTabindex(idx: number): number {
+    if (selectedSegment) return selectedSegment.idx === idx ? 0 : -1;
+    return idx === data.segments[0]?.idx ? 0 : -1;
   }
 
   function neighborKey(n: { movieId: number; startSeq: number }): string {
@@ -309,6 +361,7 @@
         onpointermove={onScrubMove}
         onpointerup={onScrubUp}
         onclick={onScrubClick}
+        onkeydown={onScrubKey}
         onpointercancel={() => {
           scrubbing = false;
           provisionalIdx = null;
@@ -319,6 +372,7 @@
             role="tab"
             aria-selected={selectedSegment?.idx === segment.idx}
             aria-label="Moment {pct(segment.arc)} through"
+            tabindex={blockTabindex(segment.idx)}
             data-idx={segment.idx}
             data-start={segment.startSeq}
             class="block"
@@ -667,6 +721,13 @@
     margin: 0 0 var(--space-1);
   }
 
+  /* Generated headlines arrive in sentence fragments of mixed case; the
+     display leads with them, so the first letter dresses up here rather than
+     in the data. */
+  .headline::first-letter {
+    text-transform: uppercase;
+  }
+
   .summary {
     margin: var(--space-2) 0 0;
     padding-top: var(--space-2);
@@ -730,6 +791,10 @@
     font-size: 0.8rem;
     padding: var(--space-2) 0 var(--space-1);
     cursor: pointer;
+    /* Text-sized controls still need a finger-sized target. */
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
   }
 
   .capped {
@@ -864,6 +929,8 @@
   .meet {
     font-size: 0.75rem;
     color: var(--text-muted);
+    display: inline-block;
+    padding: var(--space-1) 0 var(--space-2);
   }
 
   footer {
@@ -915,6 +982,12 @@
 
     .panel.dragging {
       transition: none;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .panel {
+        transition: none;
+      }
     }
 
     .handle {
