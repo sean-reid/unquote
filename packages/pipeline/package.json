@@ -27,7 +27,8 @@
     "embed-summaries": "tsx src/stages/embed-summaries.ts",
     "load-ladder": "tsx src/stages/load-ladder.ts",
     "reconcile": "uv sync -q --project python && uv run --project python python/reconcile.py --old-jsonl data/utterances.prev.jsonl --old-bin data/embeddings.prev.bin --new-jsonl data/utterances.jsonl --out-bin data/embeddings.bin",
-    "generic": "uv sync -q --project python && uv run --project python python/generic.py --beats data/beats.jsonl --bin data/beat-embeddings.bin --out data/beat-generic.bin"
+    "generic": "uv sync -q --project python && uv run --project python python/generic.py --rows data/beats.jsonl --bin data/beat-embeddings.bin --out data/beat-generic.bin",
+    "generic-summaries": "uv sync -q --project python && uv run --project python python/generic.py --rows data/summaries.jsonl --bin data/summary-embeddings.bin --out data/summary-generic.bin"
   },
   "dependencies": {
     "@clickhouse/client": "^1.23.1",

@@ -1,20 +1,24 @@
-"""Per-beat genericness: how much a beat resembles the rest of cinema.
+"""Per-row genericness: how much a row resembles the rest of cinema.
 
 Universal filler ("How is it? Horrible", greetings, arguments) sits near
 everything in embedding space and wins raw-cosine matching everywhere it
 appears, which is exactly what made the first bridge matches mush. Each
-beat's genericness is the mean similarity to its top-K nearest cross-film
-beats; downstream ranking subtracts it so only distinctive resonance wins.
+row's genericness is the mean similarity to its top-K nearest cross-film
+rows; downstream ranking subtracts it so only distinctive resonance wins.
+The same statistic serves beats (dialogue space) and scene summaries
+(event space, where "two people argue" is the filler).
 
 Exact all-pairs at full corpus is ~6e17 flops (a day of GPU), so the top-K
-runs against a fixed random sample of the corpus instead. Generic beats have
-thousands of near-neighbors and hit the sample everywhere; distinctive beats
+runs against a fixed random sample of the corpus instead. Generic rows have
+thousands of near-neighbors and hit the sample everywhere; distinctive rows
 miss it everywhere. The estimate preserves exactly the ordering the ranking
 needs. Sample indexes are seeded, so runs are reproducible.
 
 Usage:
-    uv run generic.py --beats data/beats.jsonl --bin data/beat-embeddings.bin \
+    uv run generic.py --rows data/beats.jsonl --bin data/beat-embeddings.bin \
         --out data/beat-generic.bin
+    uv run generic.py --rows data/summaries.jsonl \
+        --bin data/summary-embeddings.bin --out data/summary-generic.bin
 """
 
 import argparse
@@ -29,7 +33,7 @@ CHUNK = 4096
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--beats", required=True, type=Path)
+    parser.add_argument("--rows", required=True, type=Path)
     parser.add_argument("--bin", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
@@ -42,14 +46,14 @@ def main() -> None:
     count = int(meta["count"])
 
     movie_ids = np.empty(count, dtype=np.int64)
-    with args.beats.open() as f:
+    with args.rows.open() as f:
         for i, line in enumerate(f):
             movie_ids[i] = json.loads(line)["movieId"]
     if i + 1 != count:
-        raise SystemExit(f"beats jsonl has {i + 1} rows, meta says {count}")
+        raise SystemExit(f"rows jsonl has {i + 1} rows, meta says {count}")
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    print(f"genericness on {device}: {count} beats, sample {SAMPLE}, top {TOP_K}", flush=True)
+    print(f"genericness on {device}: {count} rows, sample {SAMPLE}, top {TOP_K}", flush=True)
 
     vectors = np.memmap(args.bin, dtype="<f4", mode="r", shape=(count, dim))
     rng = np.random.default_rng(SEED)
