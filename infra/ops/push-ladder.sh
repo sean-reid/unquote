@@ -104,11 +104,14 @@ echo "ladder swap complete"
 EOF
 
 echo "launching server-side import..."
-ssh "$UNQUOTE_HOST" 'nohup bash /root/ladder-import.sh > /root/ladder-import.log 2>&1 & echo launched'
+# The old log must go first: a launch that dies with the connection would
+# otherwise leave the poll matching last run's success line.
+ssh "$UNQUOTE_HOST" 'rm -f /root/ladder-import.log && nohup bash /root/ladder-import.sh > /root/ladder-import.log 2>&1 & echo launched'
 
 echo "polling..."
 while :; do
-  status=$(ssh "$UNQUOTE_HOST" 'grep -E "ladder swap complete|aborting|Exception|error" /root/ladder-import.log | tail -1' || true)
+  status=$(ssh "$UNQUOTE_HOST" 'grep -E "ladder swap complete|aborting|Exception|error" /root/ladder-import.log 2> /dev/null | tail -1' || true)
   if [ -n "$status" ]; then echo "$status"; break; fi
   sleep 30
 done
+case "$status" in "ladder swap complete") exit 0 ;; *) exit 1 ;; esac
