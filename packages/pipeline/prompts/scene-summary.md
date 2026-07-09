@@ -13,6 +13,9 @@ A JSON array of windows. Each window has:
 - `windowId`, `movieId`, `title`, `year`
 - `startSeq`, `endSeq`: the window's bounds in the full transcript
 - `lines`: the dialogue, each `{ "seq": number, "text": string }`
+- `feedback`, when present: what an earlier attempt at this window got
+  wrong. Fix exactly those mistakes; every rule below still applies.
+  A window without `feedback` is a first attempt.
 
 ## What to write
 

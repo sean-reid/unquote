@@ -32,14 +32,17 @@ import {
   type EvidenceRange,
   type GenerationKey,
 } from '../util/generate.js';
-import { log } from '../util/log.js';
 import {
-  beatFallback,
-  rankWindows,
-  tierWindows,
-  type RankedWindow,
-  type SegmentSpan,
-} from '../util/windows.js';
+  parseWindowId,
+  readGenerated,
+  repairTargets,
+  selectWindows,
+  windowPayload,
+  type SelectedWindow,
+  type SummaryRow,
+} from '../util/generated.js';
+import { log } from '../util/log.js';
+import { beatFallback, rankWindows, tierWindows, type SegmentSpan } from '../util/windows.js';
 import type { MovieRecord, Utterance } from '../types.js';
 
 const BATCH = 10;
@@ -58,11 +61,15 @@ const { values: args } = parseArgs({
     limit: { type: 'string' },
     tier: { type: 'string', default: '1' },
     model: { type: 'string', default: 'sonnet' },
+    repair: { type: 'boolean', default: false },
   },
 });
 const kind = args.kind;
 if (kind !== 'five-quotes' && kind !== 'scene-summary') {
   throw new Error('--kind must be five-quotes or scene-summary');
+}
+if (args.repair && kind !== 'scene-summary') {
+  throw new Error('--repair applies to scene-summary only');
 }
 
 const promptRaw = await readFile(
@@ -124,8 +131,25 @@ function slate(lines: Utterance[]): Utterance[] {
 // samples: each window is a segment's utterance span, ranked per film by
 // beat genericness so the surfaced tier generates first. Films the segments
 // stage skipped (none today) fall back to their beats.
-const surfaced = new Map<number, RankedWindow[]>();
-if (kind === 'scene-summary') {
+const surfaced = new Map<number, Array<{ startSeq: number; endSeq: number }>>();
+const repairFeedback = new Map<string, string[]>();
+if (kind === 'scene-summary' && args.repair) {
+  // Repair targets come from the store: rows still failing after the
+  // revalidation pass regenerate with their lint findings attached, and the
+  // repaired rows supersede the failures by being appended last.
+  for (const row of repairTargets(readGenerated<SummaryRow>('scene-summary.jsonl'))) {
+    const { movieId, startSeq, endSeq } = parseWindowId(row.windowId);
+    const span = { startSeq, endSeq };
+    const list = surfaced.get(movieId);
+    if (list) list.push(span);
+    else surfaced.set(movieId, [span]);
+    repairFeedback.set(
+      row.windowId,
+      (row.issues ?? []).map((i) => i.detail),
+    );
+  }
+  log.step(`repair: ${repairFeedback.size} windows across ${surfaced.size} films`);
+} else if (kind === 'scene-summary') {
   const tier = args.tier as '1' | '2' | 'all';
   if (tier !== '1' && tier !== '2' && tier !== 'all') {
     throw new Error('--tier must be 1, 2, or all');
@@ -237,19 +261,11 @@ async function invoke(payload: unknown): Promise<{ reply: string; model: string 
   return { reply: envelope.result, model: model ?? args.model! };
 }
 
-interface WindowItem {
-  windowId: string;
-  movieId: number;
-  startSeq: number;
-  endSeq: number;
-  lines: Array<{ seq: number; text: string }>;
-}
-
 interface PendingFilm {
   movieId: number;
   hash: string;
   lines: Utterance[];
-  windows: WindowItem[];
+  windows: SelectedWindow[];
 }
 
 // Films stream grouped by movieId, so one film is buffered at a time while
@@ -272,17 +288,15 @@ function takeFilm(): void {
     pending.push({ movieId: currentId, hash, lines: current, windows: [] });
     return;
   }
-  const needed: WindowItem[] = [];
-  for (const w of surfaced.get(currentId) ?? []) {
-    const lines = current
-      .filter((u) => u.seq >= w.startSeq && u.seq <= w.endSeq)
-      .map((u) => ({ seq: u.seq, text: u.text }));
-    if (lines.length === 0) continue;
-    const windowId = `${currentId}:${w.startSeq}-${w.endSeq}`;
-    if (needsRun(existing.get(windowId), inputHash(lines.map((l) => l.text)), promptVersion)) {
-      needed.push({ windowId, movieId: currentId, startSeq: w.startSeq, endSeq: w.endSeq, lines });
-    }
-  }
+  const needed = selectWindows(
+    currentId,
+    current.map((u) => ({ seq: u.seq, text: u.text })),
+    surfaced.get(currentId) ?? [],
+    existing,
+    promptVersion,
+    Boolean(args.repair),
+    repairFeedback,
+  );
   if (needed.length === 0) {
     skipped += 1;
     return;
@@ -407,11 +421,7 @@ if (kind === 'five-quotes') {
       size += wSize;
       take += 1;
     }
-    const items = allWindows.slice(at, at + take).map((w) => ({
-      ...w,
-      title: byId.get(w.movieId)?.title,
-      year: byId.get(w.movieId)?.year,
-    }));
+    const items = allWindows.slice(at, at + take).map((w) => windowPayload(w, byId.get(w.movieId)));
     at += take;
     const rows: unknown[] = [];
     type Answer = {
