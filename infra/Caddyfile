@@ -6,6 +6,7 @@ unquote.dwainosaur.com {
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		# unsafe-inline covers SvelteKit's hydration script and the theme
 		# snippet in app.html; tighten with kit's csp nonces in the hardening phase.
 		Content-Security-Policy "default-src 'self'; img-src 'self' https://image.tmdb.org data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'self'; form-action 'self'"
