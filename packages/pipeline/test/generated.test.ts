@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { inputHash } from '../src/util/generate.js';
 import {
+  alignedScores,
   parseWindowId,
   readGenerated,
   repairTargets,
@@ -162,5 +163,23 @@ describe('windowPayload', () => {
     ) as Record<string, unknown>;
     expect(repaired.feedback).toEqual(['no names']);
     expect(repaired.title).toBe('The Godfather');
+  });
+});
+
+describe('alignedScores', () => {
+  it('reads a score per row when the file length matches exactly', () => {
+    const bytes = Buffer.alloc(12);
+    bytes.writeFloatLE(0.25, 0);
+    bytes.writeFloatLE(0.5, 4);
+    bytes.writeFloatLE(1, 8);
+    const scores = alignedScores(bytes, 3);
+    expect(scores).not.toBeNull();
+    expect([...scores!]).toEqual([0.25, 0.5, 1]);
+  });
+
+  it('rejects a stale or torn file instead of misaligning rows', () => {
+    expect(alignedScores(Buffer.alloc(12), 4)).toBeNull();
+    expect(alignedScores(Buffer.alloc(13), 3)).toBeNull();
+    expect(alignedScores(Buffer.alloc(0), 1)).toBeNull();
   });
 });

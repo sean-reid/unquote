@@ -47,7 +47,7 @@ MAP_COLS="movie_id UInt32, x Float32, y Float32"
 FIVE_COLS="movie_id UInt32, seqs Array(UInt32)"
 QUALITY_COLS="movie_id UInt32, downrank UInt8, non_english UInt8, source_kind LowCardinality(String)"
 SUMMARY_COLS="movie_id UInt32, start_seq UInt32, end_seq UInt32, headline String, summary String"
-SUMVEC_COLS="movie_id UInt32, start_seq UInt32, end_seq UInt32, vec Array(Float32)"
+SUMVEC_COLS="movie_id UInt32, start_seq UInt32, end_seq UInt32, generic Float32, vec Array(Float32)"
 
 make_pair() { # table, cols, order, extra_index
   chq "DROP TABLE IF EXISTS $1_staging"

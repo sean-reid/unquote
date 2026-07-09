@@ -152,3 +152,13 @@ export function windowPayload(
 ): SelectedWindow & { title?: string; year?: number } {
   return { ...w, title: movie?.title, year: movie?.year };
 }
+
+/**
+ * A row-aligned Float32 score file is only trustworthy when its length
+ * matches the artifact it scores; anything else (stale run, mid-write read)
+ * loads as null and the caller falls back to zeros.
+ */
+export function alignedScores(bytes: Buffer, expectedRows: number): Float32Array | null {
+  if (bytes.byteLength !== expectedRows * 4) return null;
+  return new Float32Array(bytes.buffer, bytes.byteOffset, expectedRows);
+}

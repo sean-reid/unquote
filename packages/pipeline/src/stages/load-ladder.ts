@@ -11,7 +11,7 @@ import path from 'node:path';
 import { createClient, type ClickHouseClient } from '@clickhouse/client';
 import { DATA_DIR } from '../config.js';
 import { readJsonl } from '../util/fs.js';
-import { readGenerated } from '../util/generated.js';
+import { alignedScores, readGenerated } from '../util/generated.js';
 
 const DATABASE = 'unquote';
 const INSERT_BATCH = 2000;
@@ -76,7 +76,7 @@ async function createTables(ch: ClickHouseClient, dim: number): Promise<void> {
     five_lines: `(movie_id UInt32, seqs Array(UInt32)) ENGINE = MergeTree ORDER BY movie_id`,
     movie_quality: `(movie_id UInt32, downrank UInt8, non_english UInt8, source_kind LowCardinality(String)) ENGINE = MergeTree ORDER BY movie_id`,
     scene_summaries: `(movie_id UInt32, start_seq UInt32, end_seq UInt32, headline String, summary String) ENGINE = MergeTree ORDER BY (movie_id, start_seq)`,
-    summary_vectors: `(movie_id UInt32, start_seq UInt32, end_seq UInt32, vec Array(Float32), ${vectorIndex(dim)}) ENGINE = MergeTree ORDER BY (movie_id, start_seq)`,
+    summary_vectors: `(movie_id UInt32, start_seq UInt32, end_seq UInt32, generic Float32, vec Array(Float32), ${vectorIndex(dim)}) ENGINE = MergeTree ORDER BY (movie_id, start_seq)`,
   };
   for (const [name, schema] of Object.entries(tables)) {
     await ch.command({
@@ -272,16 +272,28 @@ async function main(): Promise<void> {
     if (summaryMeta.dim !== dim) {
       throw new Error(`summary dim ${summaryMeta.dim} differs from beat dim ${dim}`);
     }
+    // Summary genericness lags the embed sweep the same way the sweep lags
+    // the store; a stale or absent score file loads as zeros so the bridge
+    // gate treats unscored rows as maximally distinctive rather than
+    // blocking the load.
+    const genericPath = path.join(DATA_DIR, 'summary-generic.bin');
+    const summaryGeneric = existsSync(genericPath)
+      ? alignedScores(await readFile(genericPath), summaryMeta.count)
+      : null;
+    if (!summaryGeneric) {
+      console.warn('summary-generic.bin absent or misaligned; loading zeros');
+    }
     summaryVecCount = await loadVectorRows<{ movieId: number; startSeq: number; endSeq: number }>(
       ch,
       'summary_vectors_staging',
       'summaries.jsonl',
       'summary-embeddings.bin',
       dim,
-      (s, vec) => ({
+      (s, vec, row) => ({
         movie_id: s.movieId,
         start_seq: s.startSeq,
         end_seq: s.endSeq,
+        generic: summaryGeneric ? summaryGeneric[row] : 0,
         vec,
       }),
     );
