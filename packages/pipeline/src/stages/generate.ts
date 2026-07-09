@@ -202,6 +202,8 @@ async function runClaude(prompt: string): Promise<string> {
     try {
       return await runClaudeOnce(prompt);
     } catch (err) {
+      // A usage-policy refusal is deterministic; retrying only burns time.
+      if (String(err).includes('Usage Policy')) throw err;
       log.warn(`claude invocation failed, retrying in ${wait / 1000}s: ${String(err)}`);
       await new Promise((r) => setTimeout(r, wait));
     }
@@ -403,12 +405,44 @@ for (let at = 0; at < pending.length; at += BATCH) {
     }));
     at += take;
     const rows: unknown[] = [];
-    const { reply, model } = await invoke(items);
-    const parsed =
-      extractJson<
-        Array<{ windowId: string; headline: string; summary: string; evidence: EvidenceRange[] }>
-      >(reply);
+    type Answer = { windowId: string; headline: string; summary: string; evidence: EvidenceRange[] };
+    const refused = new Set<string>();
+    let model = args.model!;
+    // A policy refusal poisons a whole batch; bisect to isolate the window
+    // that triggers it, park just that one, and generate the rest.
+    const summarize = async (slice: typeof items): Promise<Answer[]> => {
+      try {
+        const result = await invoke(slice);
+        model = result.model;
+        return extractJson<Answer[]>(result.reply);
+      } catch (err) {
+        if (!String(err).includes('Usage Policy')) throw err;
+        if (slice.length === 1) {
+          refused.add(slice[0]!.windowId);
+          log.warn(`window ${slice[0]!.windowId} refused on policy; parked`);
+          return [];
+        }
+        const mid = Math.ceil(slice.length / 2);
+        return [
+          ...(await summarize(slice.slice(0, mid))),
+          ...(await summarize(slice.slice(mid))),
+        ];
+      }
+    };
+    const parsed = await summarize(items);
     for (const item of items) {
+      if (refused.has(item.windowId)) {
+        rows.push({
+          windowId: item.windowId,
+          movieId: item.movieId,
+          inputHash: inputHash(item.lines.map((l) => l.text)),
+          promptVersion,
+          model,
+          refused: true,
+          valid: false,
+        });
+        continue;
+      }
       const answer = parsed.find((p) => p.windowId === item.windowId);
       if (!answer) continue;
       // The headline is a sentence of its own; joining with a period keeps
