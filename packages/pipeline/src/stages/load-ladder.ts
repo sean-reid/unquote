@@ -1,10 +1,11 @@
 /**
  * Load the context ladder into ClickHouse: beats, segments, movie pairs, the
- * 2D movie map, and the five-lines picks. Staging tables and an atomic swap,
- * mirroring the base load stage.
+ * 2D movie map, the five-lines picks, and scene summaries. Staging tables and
+ * an atomic swap, mirroring the base load stage.
  *
  * Run: pnpm load-ladder
  */
+import { existsSync, readFileSync } from 'node:fs';
 import { open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createClient, type ClickHouseClient } from '@clickhouse/client';
@@ -51,6 +52,37 @@ function vectorIndex(dim: number): string {
   return `INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', ${dim}, 'bf16', 16, 128) GRANULARITY 100000000`;
 }
 
+interface SummaryRow {
+  windowId: string;
+  movieId: number;
+  headline: string;
+  summary: string;
+  valid: boolean;
+}
+
+/**
+ * The generation stores are append-only JSONL that a running generation may
+ * still be writing: the last row per key wins, a missing file is an empty
+ * store, and a torn final line (a write caught mid-append) is skipped.
+ */
+function readGenerated<T extends { movieId: number; windowId?: string }>(
+  name: string,
+): Map<string, T> {
+  const file = path.join(DATA_DIR, 'generated', name);
+  const rows = new Map<string, T>();
+  if (!existsSync(file)) return rows;
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line) as T;
+      rows.set(row.windowId ?? String(row.movieId), row);
+    } catch {
+      // The trailing line of a live append; the next load picks it up.
+    }
+  }
+  return rows;
+}
+
 async function createTables(ch: ClickHouseClient, dim: number): Promise<void> {
   const tables: Record<string, string> = {
     beats: `(movie_id UInt32, idx UInt32, start_seq UInt32, end_seq UInt32, arc Float32, text String, vec Array(Float32), generic Float32, ${vectorIndex(dim)}) ENGINE = MergeTree ORDER BY (movie_id, idx)`,
@@ -59,6 +91,7 @@ async function createTables(ch: ClickHouseClient, dim: number): Promise<void> {
     movie_map: `(movie_id UInt32, x Float32, y Float32) ENGINE = MergeTree ORDER BY movie_id`,
     five_lines: `(movie_id UInt32, seqs Array(UInt32)) ENGINE = MergeTree ORDER BY movie_id`,
     movie_quality: `(movie_id UInt32, downrank UInt8, non_english UInt8, source_kind LowCardinality(String)) ENGINE = MergeTree ORDER BY movie_id`,
+    scene_summaries: `(movie_id UInt32, start_seq UInt32, end_seq UInt32, headline String, summary String) ENGINE = MergeTree ORDER BY (movie_id, start_seq)`,
   };
   for (const [name, schema] of Object.entries(tables)) {
     await ch.command({
@@ -199,9 +232,20 @@ async function main(): Promise<void> {
     format: 'JSONEachRow',
   });
 
+  // The picker's five-lines.json seeds every film; films the curated
+  // generation store covers get its picks instead. Both stores are
+  // append-only with the last row per key authoritative.
   const fiveLines: Record<string, number[]> = JSON.parse(
     await readFile(path.join(DATA_DIR, 'five-lines.json'), 'utf8'),
   );
+  let curatedCount = 0;
+  for (const row of readGenerated<{ movieId: number; quotes: Array<{ seq: number }> }>(
+    'five-quotes.jsonl',
+  ).values()) {
+    if (row.quotes.length === 0) continue;
+    fiveLines[String(row.movieId)] = row.quotes.map((q) => q.seq);
+    curatedCount += 1;
+  }
   await ch.insert({
     table: 'five_lines_staging',
     values: Object.entries(fiveLines).map(([movieId, seqs]) => ({
@@ -210,6 +254,29 @@ async function main(): Promise<void> {
     })),
     format: 'JSONEachRow',
   });
+
+  // Scene summaries trickle in over days of generation; whatever the store
+  // holds right now ships, and films without rows fall back in the app.
+  const summaries = [...readGenerated<SummaryRow>('scene-summary.jsonl').values()].filter(
+    (row) => row.valid,
+  );
+  for (let at = 0; at < summaries.length; at += INSERT_BATCH) {
+    await ch.insert({
+      table: 'scene_summaries_staging',
+      values: summaries.slice(at, at + INSERT_BATCH).map((row) => {
+        const [, span] = row.windowId.split(':');
+        const [startSeq, endSeq] = span!.split('-').map(Number);
+        return {
+          movie_id: row.movieId,
+          start_seq: startSeq,
+          end_seq: endSeq,
+          headline: row.headline,
+          summary: row.summary,
+        };
+      }),
+      format: 'JSONEachRow',
+    });
+  }
 
   // Per-film quality flags. source_kind marks films whose text is a draft
   // screenplay rather than a transcript of the shot film; the app and the
@@ -256,6 +323,7 @@ async function main(): Promise<void> {
     'movie_map',
     'five_lines',
     'movie_quality',
+    'scene_summaries',
   ]) {
     await ch.command({ query: `EXCHANGE TABLES ${name}_staging AND ${name}` });
   }
@@ -265,7 +333,8 @@ async function main(): Promise<void> {
   console.log(
     `loaded ${beatCount} beats, ${segmentCount} segments, ` +
       `${pairRows.length} pairs, ${Object.keys(map).length} map points, ` +
-      `${Object.keys(fiveLines).length} five-line films in ${seconds}s`,
+      `${Object.keys(fiveLines).length} five-line films (${curatedCount} curated), ` +
+      `${summaries.length} scene summaries in ${seconds}s`,
   );
 }
 

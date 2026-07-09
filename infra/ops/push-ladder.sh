@@ -14,7 +14,7 @@ LOCAL_AUTH=${LOCAL_AUTH:-default:unquote-local}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-TABLES="beats segments movie_pairs movie_map five_lines movie_quality"
+TABLES="beats segments movie_pairs movie_map five_lines movie_quality scene_summaries"
 
 echo "exporting from $LOCAL_CH..."
 for t in $TABLES; do
@@ -45,7 +45,8 @@ SEGMENTS_COLS="movie_id UInt32, idx UInt32, start_beat UInt32, end_beat UInt32, 
 PAIRS_COLS="movie_id UInt32, rank UInt8, similar_id UInt32, score Float32"
 MAP_COLS="movie_id UInt32, x Float32, y Float32"
 FIVE_COLS="movie_id UInt32, seqs Array(UInt32)"
-QUALITY_COLS="movie_id UInt32, downrank UInt8, non_english UInt8"
+QUALITY_COLS="movie_id UInt32, downrank UInt8, non_english UInt8, source_kind LowCardinality(String)"
+SUMMARY_COLS="movie_id UInt32, start_seq UInt32, end_seq UInt32, headline String, summary String"
 
 make_pair() { # table, cols, order, extra_index
   chq "DROP TABLE IF EXISTS $1_staging"
@@ -68,8 +69,9 @@ make_pair movie_pairs "$PAIRS_COLS" "(movie_id, rank)" ""
 make_pair movie_map "$MAP_COLS" "movie_id" ""
 make_pair five_lines "$FIVE_COLS" "movie_id" ""
 make_pair movie_quality "$QUALITY_COLS" "movie_id" ""
+make_pair scene_summaries "$SUMMARY_COLS" "(movie_id, start_seq)" ""
 
-for t in beats segments movie_pairs movie_map five_lines movie_quality; do
+for t in beats segments movie_pairs movie_map five_lines movie_quality scene_summaries; do
   echo "inserting $t..."
   zstdcat "/tmp/unquote-ladder/${t}.native.zst" | docker compose -f docker-compose.prod.yml exec -T clickhouse \
     clickhouse-client --user loader --password "$LOADER_PASSWORD" --database unquote \
@@ -86,7 +88,7 @@ echo "building segment vector index..."
 chq_ddl_vec "ALTER TABLE segments_staging ADD INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', 768, 'bf16', 16, 128) GRANULARITY 100000000"
 chq_ddl_vec "ALTER TABLE segments_staging MATERIALIZE INDEX vec_idx SETTINGS mutations_sync = 2"
 
-for t in beats segments movie_pairs movie_map five_lines movie_quality; do
+for t in beats segments movie_pairs movie_map five_lines movie_quality scene_summaries; do
   chq "CREATE TABLE IF NOT EXISTS $t AS ${t}_staging"
   chq "EXCHANGE TABLES ${t}_staging AND $t"
   chq "DROP TABLE IF EXISTS ${t}_staging"
