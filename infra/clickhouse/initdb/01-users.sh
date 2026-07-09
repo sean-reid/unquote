@@ -17,6 +17,13 @@ ch "CREATE USER IF NOT EXISTS app IDENTIFIED BY '${APP_PASSWORD}'"
 ch "GRANT SELECT ON unquote.* TO app"
 ch "GRANT INSERT ON unquote.search_log TO app"
 ch "GRANT INSERT ON unquote.pageviews TO app"
+# One runaway query must not take the box down with it. No readonly here:
+# the analytics INSERTs need to keep flowing; grants scope what app can write.
+ch "CREATE SETTINGS PROFILE IF NOT EXISTS app_limits SETTINGS
+      max_execution_time = 10,
+      max_memory_usage = 4000000000,
+      max_result_rows = 100000
+    TO app"
 
 ch "CREATE USER IF NOT EXISTS loader IDENTIFIED BY '${LOADER_PASSWORD}'"
 ch "GRANT ALL ON unquote.* TO loader"
