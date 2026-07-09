@@ -265,8 +265,7 @@
     "expectFilm": "^se7en$|^seven$",
     "expectInTop": 5,
     "mustBeInCorpus": false,
-    "note": "film missing until rescue pass",
-    "knownGap": "se7en imsdb draft lacks the shot-film line; the upgrade pass could not replace it because the transcript source now bot-challenges, so it stays on the draft"
+    "note": "film missing until rescue pass; the line arrived with the opensubtitles transcript upgrade"
   },
   {
     "query": "play it again sam",
