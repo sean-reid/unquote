@@ -5,12 +5,13 @@
  *
  * Run: pnpm load-ladder
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { open, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createClient, type ClickHouseClient } from '@clickhouse/client';
 import { DATA_DIR } from '../config.js';
 import { readJsonl } from '../util/fs.js';
+import { readGenerated } from '../util/generated.js';
 
 const DATABASE = 'unquote';
 const INSERT_BATCH = 2000;
@@ -60,29 +61,6 @@ interface SummaryRow {
   valid: boolean;
 }
 
-/**
- * The generation stores are append-only JSONL that a running generation may
- * still be writing: the last row per key wins, a missing file is an empty
- * store, and a torn final line (a write caught mid-append) is skipped.
- */
-function readGenerated<T extends { movieId: number; windowId?: string }>(
-  name: string,
-): Map<string, T> {
-  const file = path.join(DATA_DIR, 'generated', name);
-  const rows = new Map<string, T>();
-  if (!existsSync(file)) return rows;
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const row = JSON.parse(line) as T;
-      rows.set(row.windowId ?? String(row.movieId), row);
-    } catch {
-      // The trailing line of a live append; the next load picks it up.
-    }
-  }
-  return rows;
-}
-
 async function createTables(ch: ClickHouseClient, dim: number): Promise<void> {
   const tables: Record<string, string> = {
     beats: `(movie_id UInt32, idx UInt32, start_seq UInt32, end_seq UInt32, arc Float32, text String, vec Array(Float32), generic Float32, ${vectorIndex(dim)}) ENGINE = MergeTree ORDER BY (movie_id, idx)`,
@@ -92,6 +70,7 @@ async function createTables(ch: ClickHouseClient, dim: number): Promise<void> {
     five_lines: `(movie_id UInt32, seqs Array(UInt32)) ENGINE = MergeTree ORDER BY movie_id`,
     movie_quality: `(movie_id UInt32, downrank UInt8, non_english UInt8, source_kind LowCardinality(String)) ENGINE = MergeTree ORDER BY movie_id`,
     scene_summaries: `(movie_id UInt32, start_seq UInt32, end_seq UInt32, headline String, summary String) ENGINE = MergeTree ORDER BY (movie_id, start_seq)`,
+    summary_vectors: `(movie_id UInt32, start_seq UInt32, end_seq UInt32, vec Array(Float32), ${vectorIndex(dim)}) ENGINE = MergeTree ORDER BY (movie_id, start_seq)`,
   };
   for (const [name, schema] of Object.entries(tables)) {
     await ch.command({
@@ -278,6 +257,35 @@ async function main(): Promise<void> {
     });
   }
 
+  // Summary vectors come from the embed-summaries artifact, which lags the
+  // store by design: a summary searches only once it has been embedded. A
+  // missing artifact just means an empty retrieval table this load.
+  let summaryVecCount = 0;
+  if (existsSync(path.join(DATA_DIR, 'summary-embeddings.bin'))) {
+    const summaryMeta = await readMeta('summary-embeddings.meta.json');
+    if (summaryMeta.dim !== dim) {
+      throw new Error(`summary dim ${summaryMeta.dim} differs from beat dim ${dim}`);
+    }
+    summaryVecCount = await loadVectorRows<{ movieId: number; startSeq: number; endSeq: number }>(
+      ch,
+      'summary_vectors_staging',
+      'summaries.jsonl',
+      'summary-embeddings.bin',
+      dim,
+      (s, vec) => ({
+        movie_id: s.movieId,
+        start_seq: s.startSeq,
+        end_seq: s.endSeq,
+        vec,
+      }),
+    );
+    if (summaryVecCount !== summaryMeta.count) {
+      throw new Error(
+        `summaries.jsonl has ${summaryVecCount} rows, meta says ${summaryMeta.count}`,
+      );
+    }
+  }
+
   // Per-film quality flags. source_kind marks films whose text is a draft
   // screenplay rather than a transcript of the shot film; the app and the
   // summary pipeline treat draft wording with less confidence.
@@ -296,7 +304,7 @@ async function main(): Promise<void> {
 
   // Vector indexes build one table at a time with a hard memory cap; the
   // container shares a small VM and parallel HNSW builds have taken it down.
-  for (const name of ['beats', 'segments']) {
+  for (const name of ['beats', 'segments', 'summary_vectors']) {
     await ch.command({
       query: `ALTER TABLE ${name}_staging ADD INDEX vec_idx vec TYPE vector_similarity('hnsw', 'cosineDistance', ${dim}, 'bf16', 16, 128) GRANULARITY 100000000`,
       clickhouse_settings: { allow_experimental_vector_similarity_index: 1 },
@@ -324,6 +332,7 @@ async function main(): Promise<void> {
     'five_lines',
     'movie_quality',
     'scene_summaries',
+    'summary_vectors',
   ]) {
     await ch.command({ query: `EXCHANGE TABLES ${name}_staging AND ${name}` });
   }
@@ -334,7 +343,7 @@ async function main(): Promise<void> {
     `loaded ${beatCount} beats, ${segmentCount} segments, ` +
       `${pairRows.length} pairs, ${Object.keys(map).length} map points, ` +
       `${Object.keys(fiveLines).length} five-line films (${curatedCount} curated), ` +
-      `${summaries.length} scene summaries in ${seconds}s`,
+      `${summaries.length} scene summaries (${summaryVecCount} searchable) in ${seconds}s`,
   );
 }
 
