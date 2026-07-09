@@ -23,6 +23,7 @@
     "map": "tsx src/stages/movie-map.ts",
     "five-lines": "tsx src/stages/five-lines.ts",
     "generate": "tsx src/stages/generate.ts",
+    "revalidate-summaries": "tsx src/stages/revalidate-summaries.ts",
     "embed-summaries": "tsx src/stages/embed-summaries.ts",
     "load-ladder": "tsx src/stages/load-ladder.ts",
     "reconcile": "uv sync -q --project python && uv run --project python python/reconcile.py --old-jsonl data/utterances.prev.jsonl --old-bin data/embeddings.prev.bin --new-jsonl data/utterances.jsonl --out-bin data/embeddings.bin",
