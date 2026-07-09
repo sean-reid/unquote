@@ -156,16 +156,21 @@ export function cleanCueText(raw: string): string {
       // An opening quote whose closer never arrives is a cue-break artifact.
       .replace(/^\s*["\u201c](?=[^"\u201c\u201d]*$)/, '')
       .replace(/\s+/g, ' ')
+      // Subtitle rips space punctuation the French way ("Manure ! I hate
+      // manure !"); a space before punctuation is never right in English.
+      .replace(/ (?=[.,!?;:])/g, '')
       .trim()
   );
 }
 
 /**
  * Subtitle-OCR sources misread capital I as lowercase l ("lf you build it",
- * "lt's alive") and detach punctuation ("he will come ."). The rewrites are
- * unambiguous, but they only run in films that show the OCR signature, so a
- * clean transcript is never touched. The l fix needs a following consonant,
- * boundary, or apostrophe: "look", "llama", and "lbs" stay as written.
+ * "lt's alive"). The rewrite is unambiguous but only runs in films that show
+ * the OCR signature, so a clean transcript is never touched — "lt." is a
+ * lowercased Lieutenant in a film this never fires on. It must see cleaned
+ * text: fused markup ("blt's okay./b") hides the word boundaries the rewrite
+ * anchors on. The l fix needs a following consonant, boundary, or apostrophe:
+ * "look", "llama", and "lbs" stay as written.
  */
 const OCR_SIGNATURE = /\b(?:lf|lt|ln|l'm|l've|l'll|l'd)\b/;
 
@@ -176,9 +181,7 @@ export function fixOcrArtifacts(cues: string[]): string[] {
     if (hits >= 3) break;
   }
   if (hits < 3) return cues;
-  return cues.map((cue) =>
-    cue.replace(/\bl(?=[cdfgjkmnpqstvwxz]|\b|')/g, 'I').replace(/ +(?=[.,!?;:])/g, ''),
-  );
+  return cues.map((cue) => cue.replace(/\bl(?=[cdfgjkmnpqstvwxz]|\b|')/g, 'I'));
 }
 
 /**
@@ -361,25 +364,29 @@ export function buildUtterances(cues: string[], options: BuildOptions = {}): Bui
     texts.push(text);
   };
 
-  const fixed = fixOcrArtifacts(cues);
-  const marked = lyricRunMask(fixed, options.musical ?? false);
-  const unmarked = unmarkedLyricMask(fixed);
+  const marked = lyricRunMask(cues, options.musical ?? false);
+  const unmarked = unmarkedLyricMask(cues);
   const lyric = marked.map((m, i) => m || unmarked[i]!);
   // Masks see the original cues (their music markers live in brackets); the
   // text pipeline sees cues with cross-cue direction spans removed.
-  const stripped = stripCrossCueDirections(fixed);
+  const stripped = stripCrossCueDirections(cues);
+  // The gated OCR pass runs on cleaned text: markup fused to a misread
+  // ("blt's okay./b") hides the word boundary the rewrite needs, so raw cues
+  // would leave exactly the famous lines it exists to fix.
+  const cleanedAll = fixOcrArtifacts(
+    stripped.map((cue, index) =>
+      cleanCueText(
+        stripTitleCardPrefix(cue, options.title, cues.length > 0 ? index / cues.length : 0),
+      ),
+    ),
+  );
 
-  fixed.forEach((_raw, index) => {
+  cues.forEach((_raw, index) => {
     if (lyric[index]) {
       dropped.lyrics += 1;
       return;
     }
-    const prefixless = stripTitleCardPrefix(
-      stripped[index]!,
-      options.title,
-      cues.length > 0 ? index / cues.length : 0,
-    );
-    const cleaned = cleanCueText(prefixless);
+    const cleaned = cleanedAll[index]!;
     if (cleaned.length === 0) {
       dropped.empty += 1;
       return;

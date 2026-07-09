@@ -424,13 +424,13 @@ describe('group speaker labels', () => {
 
 describe('fixOcrArtifacts', () => {
   const ocr = [
-    "lf you build it, he will come .",
-    "All right. lf you build it, he will come .",
+    'lf you build it, he will come.',
+    'All right. lf you build it, he will come.',
     "l'm telling you, lt's real. ln the corn.",
     'N ice try. Look, a llama weighs 300 lbs.',
   ];
 
-  it('fixes l-for-I misreads and reattaches punctuation in flagged films', () => {
+  it('fixes l-for-I misreads in flagged films', () => {
     expect(fixOcrArtifacts(ocr)).toEqual([
       'If you build it, he will come.',
       'All right. If you build it, he will come.',
@@ -442,5 +442,28 @@ describe('fixOcrArtifacts', () => {
   it('leaves films without the OCR signature alone', () => {
     const clean = ['lf you say so.', 'Nothing else here.', 'Or here.'];
     expect(fixOcrArtifacts(clean)).toBe(clean);
+  });
+
+  it('repairs misreads fused to bold-tag markup once cleaning has run', () => {
+    const cues = [
+      "bl called you, John. lt's okay, it's okay./b",
+      "blt's okay./b",
+      "blt'll be like back in the day./b",
+      'blf you can get in./b',
+    ];
+    const { texts } = buildUtterances(cues);
+    expect(texts.join(' ')).toBe(
+      "I called you, John. It's okay, it's okay. It's okay. It'll be like back in the day. If you can get in.",
+    );
+  });
+});
+
+describe('punctuation spacing', () => {
+  it('reattaches French-spaced punctuation in any film', () => {
+    expect(cleanCueText('Manure ! I hate manure !')).toBe('Manure! I hate manure!');
+    expect(cleanCueText('Why ? Because I said so ; twice.')).toBe(
+      'Why? Because I said so; twice.',
+    );
+    expect(cleanCueText('Wait . . . what?')).toBe('Wait... what?');
   });
 });
