@@ -11,6 +11,7 @@
   let panel = $state<ScenePanel | null>(null);
   let loading = $state(false);
   let expanded = $state(false);
+  let summaryOpen = $state(false);
   let expandedNeighbor = $state<string | null>(null);
   let dragY = $state(0);
   let dragging = $state(false);
@@ -36,14 +37,13 @@
     return containers[0] ?? null;
   });
 
-  /** The scene's dialogue: shown compact without a summary, behind the
-   * expander when the summary carries the panel. */
+  /** The scene's dialogue leads the panel; the generated summary waits
+   * behind its own expander. */
   const evidenceLines = $derived<string[]>(panel?.evidence.lines ?? []);
   const evidenceTotal = $derived(panel?.evidence.totalLines ?? 0);
-  const evidenceShown = $derived.by<string[]>(() => {
-    if (panel?.summary) return expanded ? evidenceLines : [];
-    return expanded ? evidenceLines : evidenceLines.slice(0, SOURCE_PREVIEW_LINES);
-  });
+  const evidenceShown = $derived<string[]>(
+    expanded ? evidenceLines : evidenceLines.slice(0, SOURCE_PREVIEW_LINES),
+  );
   const evidenceCapped = $derived(expanded && evidenceTotal > evidenceLines.length);
 
   let selectedIdx = $state<number | null>(null);
@@ -55,6 +55,7 @@
     loading = true;
     panel = null;
     expanded = false;
+    summaryOpen = false;
     expandedNeighbor = null;
     dragY = 0;
     try {
@@ -376,21 +377,28 @@
             </p>
             {#if panel?.summary}
               <h3 class="headline">{panel.summary.headline}</h3>
-              <p class="summary">{panel.summary.summary}</p>
             {/if}
             <div class="sub-lines">
               {#each evidenceShown as text, i (i)}
                 <p class="sub-line">{text}</p>
               {/each}
             </div>
+            {#if panel?.summary && summaryOpen}
+              <p class="summary">{panel.summary.summary}</p>
+            {/if}
             {#if panel?.summary || evidenceLines.length > SOURCE_PREVIEW_LINES}
-              <button class="expander" onclick={() => (expanded = !expanded)}>
+              <div class="panel-actions">
                 {#if panel?.summary}
-                  {expanded ? 'hide the dialogue' : 'read the dialogue'}
-                {:else}
-                  {expanded ? 'show less' : `show all ${evidenceTotal} lines`}
+                  <button class="expander" onclick={() => (summaryOpen = !summaryOpen)}>
+                    {summaryOpen ? 'hide' : 'what happens here'}
+                  </button>
                 {/if}
-              </button>
+                {#if evidenceLines.length > SOURCE_PREVIEW_LINES}
+                  <button class="expander" onclick={() => (expanded = !expanded)}>
+                    {expanded ? 'show less' : `show all ${evidenceTotal} lines`}
+                  </button>
+                {/if}
+              </div>
             {/if}
             {#if evidenceCapped}
               <p class="capped">first {evidenceLines.length} of {evidenceTotal} lines</p>
@@ -660,10 +668,17 @@
   }
 
   .summary {
-    margin: 0 0 var(--space-1);
+    margin: var(--space-2) 0 0;
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border);
     color: var(--text-muted);
     font-size: 0.95rem;
     line-height: 1.5;
+  }
+
+  .panel-actions {
+    display: flex;
+    gap: var(--space-3);
   }
 
   .this-part {
@@ -713,7 +728,7 @@
     color: var(--accent);
     font: inherit;
     font-size: 0.8rem;
-    padding: var(--space-1) 0 0;
+    padding: var(--space-2) 0 var(--space-1);
     cursor: pointer;
   }
 

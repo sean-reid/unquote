@@ -84,23 +84,23 @@ test('one selection fills the whole panel with one request', async ({ page }) =>
   expect(neighborCalls).toBe(1);
 });
 
-test('a summarized scene leads with its headline, dialogue behind the expander', async ({
+test('a summarized scene shows its headline over the dialogue, summary on demand', async ({
   page,
 }) => {
   test.skip(summaryFilm === 0, 'no scene summaries loaded yet');
   await page.goto(`/movie/${summaryFilm}`);
   await page.locator(`.block[data-idx="${summaryIdx}"]`).click();
   await expect(page.locator('.panel')).toHaveAttribute('data-state', 'ready');
+  // The headline orients, the dialogue leads, the summary waits.
   await expect(page.locator('.headline')).toBeVisible();
-  await expect(page.locator('.summary')).toBeVisible();
-  // The summary carries the panel; the dialogue waits behind the expander.
-  await expect(page.locator('.this-part .sub-line')).toHaveCount(0);
-  const expander = page.locator('.expander');
-  await expect(expander).toHaveText('read the dialogue');
-  await expander.click();
   await expect(page.locator('.this-part .sub-line').first()).toBeVisible();
+  await expect(page.locator('.summary')).toHaveCount(0);
+  const expander = page.locator('.expander', { hasText: 'what happens here' });
+  await expect(expander).toBeVisible();
   await expander.click();
-  await expect(page.locator('.this-part .sub-line')).toHaveCount(0);
+  await expect(page.locator('.summary')).toBeVisible();
+  await page.locator('.expander', { hasText: 'hide' }).first().click();
+  await expect(page.locator('.summary')).toHaveCount(0);
 });
 
 test('a scene the summaries have not reached shows its dialogue plainly', async ({ page }) => {
@@ -111,7 +111,7 @@ test('a scene the summaries have not reached shows its dialogue plainly', async 
   await expect(page.locator('.headline')).toHaveCount(0);
   await expect(page.locator('.this-part .sub-line').first()).toBeVisible();
   const compact = await page.locator('.this-part .sub-line').count();
-  const expander = page.locator('.expander');
+  const expander = page.locator('.expander', { hasText: 'show all' });
   if (await expander.count()) {
     await expander.click();
     expect(await page.locator('.this-part .sub-line').count()).toBeGreaterThan(compact);
