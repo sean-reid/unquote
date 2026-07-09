@@ -38,7 +38,9 @@
   <title>{searched ? `${data.response!.query} - Unquote` : 'Unquote'}</title>
   <meta
     name="description"
-    content="Search the dialogue of 2,500 films by quote, half-memory, or scene description."
+    content="Search the dialogue of {data.filmCount
+      ? data.filmCount.toLocaleString('en-US')
+      : 'thousands of'} films by quote, half-memory, or scene description."
   />
 </svelte:head>
 
@@ -150,7 +152,7 @@
         <ol>
           {#each data.response!.hits as hit, index (hit.movieId + ':' + hit.seq)}
             {#if index === data.response!.strongCount}
-              <li class="divider" aria-hidden="true"><span>weaker matches</span></li>
+              <li class="divider"><span>weaker matches</span></li>
             {/if}
             <li class="hit" class:weak={index >= data.response!.strongCount}>
               {#if posterUrl(hit.posterPath)}
@@ -531,6 +533,8 @@
     margin-left: var(--space-2);
     color: var(--text-muted);
     font-size: 0.85rem;
+    display: inline-block;
+    padding: var(--space-1) 0;
   }
 
   .moment:hover {
