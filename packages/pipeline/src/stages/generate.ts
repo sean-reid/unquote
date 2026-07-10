@@ -343,11 +343,30 @@ if (kind === 'five-quotes') {
         year: byId.get(f.movieId)?.year,
         lines: slate(f.lines).map((u) => ({ seq: u.seq, text: u.text })),
       }));
-      const { reply, model } = await invoke(payload);
-      const parsed =
-        extractJson<
-          Array<{ movieId: number; quotes: Array<{ seq?: number | null; text: string }> }>
-        >(reply);
+      type FilmAnswer = { movieId: number; quotes: Array<{ seq?: number | null; text: string }> };
+      let model = args.model!;
+      // A refusal or an unparseable reply poisons the whole batch; bisect to
+      // the film behind it and leave that film unbanked for a later run.
+      const curate = async (slice: typeof payload): Promise<FilmAnswer[]> => {
+        try {
+          const result = await invoke(slice);
+          model = result.model;
+          return extractJson<FilmAnswer[]>(result.reply);
+        } catch (err) {
+          const skippable =
+            /Usage Policy|content filtering|no JSON in reply|unterminated JSON/i.test(
+              String(err),
+            ) || err instanceof SyntaxError;
+          if (!skippable) throw err;
+          if (slice.length === 1) {
+            log.warn(`movie ${slice[0]!.movieId} curation blocked (${String(err).slice(0, 80)})`);
+            return [];
+          }
+          const mid = Math.ceil(slice.length / 2);
+          return [...(await curate(slice.slice(0, mid))), ...(await curate(slice.slice(mid)))];
+        }
+      };
+      const parsed = await curate(payload);
       for (const film of batch) {
         const answer = parsed.find((p) => p.movieId === film.movieId);
         const matcher = new FilmMatcher(film.lines);
