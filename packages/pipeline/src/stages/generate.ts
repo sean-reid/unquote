@@ -239,7 +239,7 @@ async function runClaude(prompt: string): Promise<string> {
       return await throttle.gate(() => runClaudeOnce(prompt));
     } catch (err) {
       // A usage-policy refusal is deterministic; retrying only burns time.
-      if (String(err).includes('Usage Policy')) throw err;
+      if (/Usage Policy|content filtering/i.test(String(err))) throw err;
       throttle.note(err);
       log.warn(`claude invocation failed, retrying in ${wait / 1000}s: ${String(err)}`);
       await new Promise((r) => setTimeout(r, wait));
@@ -462,7 +462,7 @@ if (kind === 'five-quotes') {
         model = result.model;
         return extractJson<Answer[]>(result.reply);
       } catch (err) {
-        const policy = String(err).includes('Usage Policy');
+        const policy = /Usage Policy|content filtering/i.test(String(err));
         const unparsed =
           err instanceof SyntaxError || /no JSON in reply|unterminated JSON/.test(String(err));
         if (!policy && !unparsed) throw err;
