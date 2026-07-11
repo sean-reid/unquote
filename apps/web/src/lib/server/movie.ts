@@ -416,29 +416,28 @@ export async function scenePanel(
 }
 
 /**
- * Bridge matching runs at beat width: beat vectors are sharper than averaged
- * segments, and the displayed excerpt is then the matching moment itself.
- * Genericness (a beat's mean similarity to its closest cross-corpus
- * neighbors, computed in the pipeline) is subtracted so universal filler
- * cannot win; greedy one-to-one assignment stops magnet moments repeating;
- * pairs below the strength bar are dropped entirely, and an empty result is
- * rendered honestly rather than padded with mush.
+ * Bridge candidates come from summary space — scene summaries embedded in
+ * the same 768d space describe what happens, so two films pair by event
+ * rather than by how their dialogue sounds — and a candidate survives only
+ * when the beat vectors inside both windows also agree the dialogue is
+ * close. Two independent spaces agreeing is the strong-match bar made
+ * mechanical. The displayed evidence is the agreeing beat pair, verbatim.
+ * Summary genericness (event-space filler is the generic action climax) is
+ * subtracted so films never bridge through their most ordinary scenes;
+ * greedy one-to-one assignment on windows and anchor beats stops magnet
+ * moments repeating; an empty result renders honestly rather than padded.
  */
-// Tuned against fixture pairs with live genericness values: 0.75 separates
-// distinctive thematic matches from common genre texture; 0.30 lets related
-// war/mob/sci-fi pairs through while unrelated films (Toy Story vs Se7en)
-// honestly show nothing.
+// Tuned on the bridge-compare harness (packages/pipeline/src/tools): the
+// unrelated controls (Toy Story vs Se7en, Titanic vs Terminator) go empty
+// while every related pair keeps three to five strong parallels. Strength
+// separates controls (peaks ~0.24) from real parallels (0.25-0.40); the
+// consensus floor sits where dialogue corroboration stops being noise.
 const BRIDGE_LAMBDA = 0.75;
-/**
- * Pairs must beat the two films' AMBIENT cross-similarity by this much. Same
- * franchise films share names, idiom, and character voice, so their raw
- * scores run high everywhere; thresholding the excess over ambient keeps
- * franchise texture out while real parallels still clear the bar. Mirrored by
- * BRIDGE_EXCESS_THRESHOLD in the vs page's stroke mapping.
- */
-const BRIDGE_EXCESS_THRESHOLD = 0.16;
-/** Above this ambient, two films sound alike throughout; the empty state says so. */
-export const BRIDGE_HIGH_AMBIENT = 0.22;
+const SUMMARY_EXCESS_THRESHOLD = 0.05;
+const SUMMARY_STRENGTH_MIN = 0.25;
+const BEAT_CONSENSUS_MIN = 0.28;
+/** Above this ambient, two films tell alike stories throughout; the empty state says so. */
+export const BRIDGE_HIGH_AMBIENT = 0.19;
 const BRIDGE_PAIRS = 5;
 
 interface BridgeBeat {
@@ -446,6 +445,13 @@ interface BridgeBeat {
   start_seq: number;
   arc: number;
   text: string;
+  vec: number[];
+  generic: number;
+}
+
+interface BridgeWindow {
+  start_seq: number;
+  end_seq: number;
   vec: number[];
   generic: number;
 }
@@ -468,6 +474,16 @@ async function bridgeBeats(movieId: number): Promise<BridgeBeat[]> {
     format: 'JSONEachRow',
   });
   return (await result.json()) as BridgeBeat[];
+}
+
+async function bridgeWindows(movieId: number): Promise<BridgeWindow[]> {
+  const result = await db.query({
+    query:
+      'SELECT start_seq, end_seq, vec, generic FROM summary_vectors WHERE movie_id = {id:UInt32} ORDER BY start_seq',
+    query_params: { id: movieId },
+    format: 'JSONEachRow',
+  });
+  return (await result.json()) as BridgeWindow[];
 }
 
 function dot(a: number[], b: number[]): number {
@@ -498,26 +514,30 @@ export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
       return [EMPTY_BRIDGE];
     }
 
-    const [beatsA, beatsB] = await Promise.all([bridgeBeats(a), bridgeBeats(b)]);
+    const [beatsA, beatsB, winsA, winsB] = await Promise.all([
+      bridgeBeats(a),
+      bridgeBeats(b),
+      bridgeWindows(a),
+      bridgeWindows(b),
+    ]);
     if (beatsA.length === 0 || beatsB.length === 0) return [EMPTY_BRIDGE];
+    if (winsA.length === 0 || winsB.length === 0) return [EMPTY_BRIDGE];
 
-    const adjusted = (beatA: BridgeBeat, beatB: BridgeBeat): number =>
-      dot(beatA.vec, beatB.vec) - (BRIDGE_LAMBDA * (beatA.generic + beatB.generic)) / 2;
-
-    // One pass over the full cross product: keep every adjusted score plus
-    // per-beat means. A real parallel is a spike above what its beat scores
-    // against the whole other film; franchise texture is a plateau, high
-    // everywhere and peaked nowhere.
-    const nA = beatsA.length;
-    const nB = beatsB.length;
+    // One pass over the summary cross product: keep every adjusted score
+    // plus per-window means. A real parallel is a spike above what its scene
+    // scores against the whole other film; franchise texture is a plateau,
+    // high everywhere and peaked nowhere.
+    const nA = winsA.length;
+    const nB = winsB.length;
     const cross = new Float32Array(nA * nB);
     const meanA = new Float64Array(nA);
     const meanB = new Float64Array(nB);
     let ambientSum = 0;
     for (let ia = 0; ia < nA; ia++) {
-      const beatA = beatsA[ia]!;
+      const winA = winsA[ia]!;
       for (let ib = 0; ib < nB; ib++) {
-        const score = adjusted(beatA, beatsB[ib]!);
+        const winB = winsB[ib]!;
+        const score = dot(winA.vec, winB.vec) - (BRIDGE_LAMBDA * (winA.generic + winB.generic)) / 2;
         cross[ia * nB + ib] = score;
         meanA[ia] = (meanA[ia] ?? 0) + score;
         meanB[ib] = (meanB[ib] ?? 0) + score;
@@ -526,33 +546,63 @@ export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
     }
     for (let ia = 0; ia < nA; ia++) meanA[ia] = meanA[ia]! / nB;
     for (let ib = 0; ib < nB; ib++) meanB[ib] = meanB[ib]! / nA;
-    const ambient = nA * nB > 0 ? ambientSum / (nA * nB) : 0;
+    const ambient = ambientSum / (nA * nB);
 
     interface Scored {
       ia: number;
       ib: number;
       strength: number;
     }
-    // Contrast gates texture out; adjusted strength ranks what remains, so a
-    // universally resonant opening still beats a merely spiky exchange.
-    const scored: Scored[] = [];
+    const candidates: Scored[] = [];
     for (let ia = 0; ia < nA; ia++) {
       for (let ib = 0; ib < nB; ib++) {
         const score = cross[ia * nB + ib]!;
         const contrast = score - (meanA[ia]! + meanB[ib]!) / 2;
-        if (contrast >= BRIDGE_EXCESS_THRESHOLD) scored.push({ ia, ib, strength: score });
+        if (contrast >= SUMMARY_EXCESS_THRESHOLD && score >= SUMMARY_STRENGTH_MIN) {
+          candidates.push({ ia, ib, strength: score });
+        }
       }
     }
-    scored.sort((x, y) => y.strength - x.strength);
+    candidates.sort((x, y) => y.strength - x.strength);
+
+    const inSpan = (beats: BridgeBeat[], win: BridgeWindow) =>
+      beats.filter((beat) => beat.start_seq >= win.start_seq && beat.start_seq <= win.end_seq);
 
     const usedA = new Set<number>();
     const usedB = new Set<number>();
-    const picked: Scored[] = [];
-    for (const pair of scored) {
-      if (usedA.has(pair.ia) || usedB.has(pair.ib)) continue;
-      usedA.add(pair.ia);
-      usedB.add(pair.ib);
-      picked.push(pair);
+    const usedBeats = new Set<string>();
+    interface Anchored extends Scored {
+      anchorA: BridgeBeat;
+      anchorB: BridgeBeat;
+    }
+    const picked: Anchored[] = [];
+    for (const cand of candidates) {
+      if (usedA.has(cand.ia) || usedB.has(cand.ib)) continue;
+      // The anchor is the closest dialogue moment inside the two scenes; if
+      // even the best one is below the consensus floor, the scenes only
+      // LOOK alike at event level and the candidate dies here.
+      let best = -Infinity;
+      let anchorA: BridgeBeat | null = null;
+      let anchorB: BridgeBeat | null = null;
+      for (const beatA of inSpan(beatsA, winsA[cand.ia]!)) {
+        if (usedBeats.has(`a${beatA.idx}`)) continue;
+        for (const beatB of inSpan(beatsB, winsB[cand.ib]!)) {
+          if (usedBeats.has(`b${beatB.idx}`)) continue;
+          const agree =
+            dot(beatA.vec, beatB.vec) - (BRIDGE_LAMBDA * (beatA.generic + beatB.generic)) / 2;
+          if (agree > best) {
+            best = agree;
+            anchorA = beatA;
+            anchorB = beatB;
+          }
+        }
+      }
+      if (!anchorA || !anchorB || best < BEAT_CONSENSUS_MIN) continue;
+      usedA.add(cand.ia);
+      usedB.add(cand.ib);
+      usedBeats.add(`a${anchorA.idx}`);
+      usedBeats.add(`b${anchorB.idx}`);
+      picked.push({ ...cand, anchorA, anchorB });
       if (picked.length === BRIDGE_PAIRS) break;
     }
 
@@ -563,19 +613,15 @@ export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
     const excerptOf = (text: string): string =>
       clip(text.split('\n').slice(0, EXCERPT_LINES).join(' '));
     console.log(`bridge ${a} vs ${b}: ambient ${ambient.toFixed(3)}, ${picked.length} pairs`);
-    const pairs = picked.map((pair) => {
-      const beatA = beatsA[pair.ia]!;
-      const beatB = beatsB[pair.ib]!;
-      return {
-        arcA: beatA.arc,
-        arcB: beatB.arc,
-        startSeqA: beatA.start_seq,
-        startSeqB: beatB.start_seq,
-        excerptA: excerptOf(beatA.text),
-        excerptB: excerptOf(beatB.text),
-        score: pair.strength,
-      };
-    });
+    const pairs = picked.map((pair) => ({
+      arcA: pair.anchorA.arc,
+      arcB: pair.anchorB.arc,
+      startSeqA: pair.anchorA.start_seq,
+      startSeqB: pair.anchorB.start_seq,
+      excerptA: excerptOf(pair.anchorA.text),
+      excerptB: excerptOf(pair.anchorB.text),
+      score: pair.strength,
+    }));
     return [{ pairs, ambient }];
   });
   return result[0] ?? EMPTY_BRIDGE;
