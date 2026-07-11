@@ -371,8 +371,28 @@ test('an unrelated pair shows the honest empty state', async ({ page }) => {
   test.skip(pairA === 0, 'movie_pairs not loaded');
   // Toy Story and Se7en share a corpus, not moments.
   await page.goto('/movie/862/vs/807');
-  await expect(page.locator('.empty')).toContainText('keep their distance');
+  await expect(page.locator('.empty')).toContainText(
+    'These two keep their distance. No close moments found.',
+  );
   await expect(page.locator('.hit')).toHaveCount(0);
+});
+
+test('a pervasively similar pair says so instead of playing unrelated', async ({ page }) => {
+  // The Godfather and GoodFellas are each other's strong movie_pairs link,
+  // yet no single scene clears the consensus bar; the empty state must say
+  // alike, not distant. Skips when the fixture corpus lacks the link or the
+  // data ever grows a bridge for them.
+  const score = Number(
+    await chQuery(
+      'SELECT max(score) FROM unquote.movie_pairs WHERE (movie_id = 238 AND similar_id = 769) OR (movie_id = 769 AND similar_id = 238)',
+    ),
+  );
+  test.skip(!(score >= 0.843), 'alike link not in this corpus');
+  await page.goto('/movie/238/vs/769');
+  test.skip((await page.locator('.hit').count()) > 0, 'pair now bridges; variant untestable here');
+  await expect(page.locator('.empty')).toContainText(
+    'These two sound alike all the way through; no single moment stands out.',
+  );
 });
 
 test('bridge pairs never repeat a moment', async ({ page }) => {
