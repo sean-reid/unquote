@@ -164,10 +164,12 @@
       <div class="sides">
         <a href="{resolve('/')}movie/{data.movieA.id}?seq={pair.startSeqA}">
           <p class="side-film">{data.movieA.title} <span>{pct(pair.arcA)} through</span></p>
+          {#if pair.headlineA}<p class="scene-name">{pair.headlineA}</p>{/if}
           <blockquote>{pair.excerptA}</blockquote>
         </a>
         <a href="{resolve('/')}movie/{data.movieB.id}?seq={pair.startSeqB}">
           <p class="side-film">{data.movieB.title} <span>{pct(pair.arcB)} through</span></p>
+          {#if pair.headlineB}<p class="scene-name">{pair.headlineB}</p>{/if}
           <blockquote>{pair.excerptB}</blockquote>
         </a>
       </div>
@@ -349,6 +351,20 @@
     color: var(--text-muted);
     font-weight: 400;
     font-size: 0.8rem;
+  }
+
+  .scene-name {
+    font-family: var(--font-quote);
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin: 0 0 var(--space-1);
+  }
+
+  /* Generated headlines arrive in sentence fragments of mixed case; the
+     card leads with them, so the first letter dresses up here rather than
+     in the data. */
+  .scene-name::first-letter {
+    text-transform: uppercase;
   }
 
   blockquote {

@@ -1,5 +1,10 @@
 import { error } from '@sveltejs/kit';
-import { BRIDGE_HIGH_AMBIENT, bridgePairs, movieHeader } from '$lib/server/movie.js';
+import {
+  PERVASIVE_ALIKE_MIN,
+  bridgePairs,
+  movieHeader,
+  pairSimilarity,
+} from '$lib/server/movie.js';
 import type { PageServerLoad } from './$types.js';
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -12,11 +17,13 @@ export const load: PageServerLoad = async ({ params }) => {
   const [movieA, movieB] = await Promise.all([movieHeader(a), movieHeader(b)]);
   if (!movieA || !movieB) error(404, 'no such pair');
 
-  const bridge = await bridgePairs(a, b);
+  const [bridge, similarity] = await Promise.all([bridgePairs(a, b), pairSimilarity(a, b)]);
   return {
     movieA,
     movieB,
     pairs: bridge.pairs,
-    soundAlikeThroughout: bridge.pairs.length === 0 && bridge.ambient >= BRIDGE_HIGH_AMBIENT,
+    // Pervasively similar films can honestly produce no single standout
+    // moment; the empty copy must not read as "unrelated" for them.
+    soundAlikeThroughout: bridge.pairs.length === 0 && similarity >= PERVASIVE_ALIKE_MIN,
   };
 };

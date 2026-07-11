@@ -37,6 +37,9 @@ export interface BridgePair {
   startSeqB: number;
   excerptA: string;
   excerptB: string;
+  /** Grounded scene headlines for the two windows, when the spans have one. */
+  headlineA?: string;
+  headlineB?: string;
   score: number;
 }
 
@@ -436,9 +439,33 @@ const BRIDGE_LAMBDA = 0.75;
 const SUMMARY_EXCESS_THRESHOLD = 0.05;
 const SUMMARY_STRENGTH_MIN = 0.25;
 const BEAT_CONSENSUS_MIN = 0.28;
-/** Above this ambient, two films tell alike stories throughout; the empty state says so. */
-export const BRIDGE_HIGH_AMBIENT = 0.19;
 const BRIDGE_PAIRS = 5;
+
+/**
+ * Whole-film similarity from the same movie_pairs links the similar-films
+ * rail shows; 0 when the films are not in each other's lists at all. The
+ * empty-ribbon copy uses this to tell "pervasively alike, no single moment
+ * stands out" apart from "genuinely unrelated".
+ */
+export async function pairSimilarity(a: number, b: number): Promise<number> {
+  const result = await rows<{ score: number }>(async () => {
+    const query = await db.query({
+      query:
+        'SELECT max(score) AS score FROM movie_pairs WHERE (movie_id = {a:UInt32} AND similar_id = {b:UInt32}) OR (movie_id = {b:UInt32} AND similar_id = {a:UInt32})',
+      query_params: { a, b },
+      format: 'JSONEachRow',
+    });
+    return (await query.json()) as Array<{ score: number }>;
+  });
+  return result[0]?.score ?? 0;
+}
+
+/**
+ * The median score across every stored similar-films link: an empty-ribbon
+ * pair must be closer than the typical neighbor the site already vouches
+ * for before the copy claims the films are alike almost everywhere.
+ */
+export const PERVASIVE_ALIKE_MIN = 0.843;
 
 interface BridgeBeat {
   idx: number;
@@ -484,6 +511,32 @@ async function bridgeWindows(movieId: number): Promise<BridgeWindow[]> {
     format: 'JSONEachRow',
   });
   return (await result.json()) as BridgeWindow[];
+}
+
+/** Headlines for the given windows, keyed start:end; spans without one are absent. */
+async function windowHeadlines(
+  movieId: number,
+  wins: BridgeWindow[],
+): Promise<Map<string, string>> {
+  if (wins.length === 0) return new Map();
+  const result = await db.query({
+    query: `SELECT start_seq, end_seq, headline FROM scene_summaries
+            WHERE movie_id = {id:UInt32} AND start_seq IN ({starts:Array(UInt32)})`,
+    query_params: { id: movieId, starts: wins.map((w) => w.start_seq) },
+    format: 'JSONEachRow',
+  });
+  const found = (await result.json()) as Array<{
+    start_seq: number;
+    end_seq: number;
+    headline: string;
+  }>;
+  const wanted = new Set(wins.map((w) => `${w.start_seq}:${w.end_seq}`));
+  const map = new Map<string, string>();
+  for (const row of found) {
+    const key = `${row.start_seq}:${row.end_seq}`;
+    if (wanted.has(key) && row.headline) map.set(key, row.headline);
+  }
+  return map;
 }
 
 function dot(a: number[], b: number[]): number {
@@ -574,6 +627,8 @@ export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
     interface Anchored extends Scored {
       anchorA: BridgeBeat;
       anchorB: BridgeBeat;
+      winA: BridgeWindow;
+      winB: BridgeWindow;
     }
     const picked: Anchored[] = [];
     for (const cand of candidates) {
@@ -602,13 +657,27 @@ export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
       usedB.add(cand.ib);
       usedBeats.add(`a${anchorA.idx}`);
       usedBeats.add(`b${anchorB.idx}`);
-      picked.push({ ...cand, anchorA, anchorB });
+      picked.push({ ...cand, anchorA, anchorB, winA: winsA[cand.ia]!, winB: winsB[cand.ib]! });
       if (picked.length === BRIDGE_PAIRS) break;
     }
 
     // A single passing pair is always the dregs of the distribution; the
     // honest empty state reads better than one weak ribbon.
     if (picked.length < 2) picked.length = 0;
+
+    // The window headlines make an event-level match legible when the
+    // anchoring dialogue is terse; a span without a valid summary simply
+    // renders without one.
+    const [headsA, headsB] = await Promise.all([
+      windowHeadlines(
+        a,
+        picked.map((p) => p.winA),
+      ),
+      windowHeadlines(
+        b,
+        picked.map((p) => p.winB),
+      ),
+    ]);
 
     const excerptOf = (text: string): string =>
       clip(text.split('\n').slice(0, EXCERPT_LINES).join(' '));
@@ -620,6 +689,8 @@ export async function bridgePairs(a: number, b: number): Promise<BridgeResult> {
       startSeqB: pair.anchorB.start_seq,
       excerptA: excerptOf(pair.anchorA.text),
       excerptB: excerptOf(pair.anchorB.text),
+      headlineA: headsA.get(`${pair.winA.start_seq}:${pair.winA.end_seq}`),
+      headlineB: headsB.get(`${pair.winB.start_seq}:${pair.winB.end_seq}`),
       score: pair.strength,
     }));
     return [{ pairs, ambient }];
