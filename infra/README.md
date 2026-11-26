@@ -1,6 +1,6 @@
 # Infra
 
-Everything needed to run unquote.dwainosaur.com on one VPS: ClickHouse, the
+Everything needed to run unquote.seanre.id on one VPS: ClickHouse, the
 SvelteKit app, and Caddy, all under Docker Compose. All server data is derived
 from local pipeline artifacts, so there are no backups; a lost box is rebuilt
 with `resurrect.sh` in under an hour.
@@ -28,7 +28,7 @@ tokens into `.env`.
    - `NETCUP_SCP_USER`: your CCP customer number
    - `NETCUP_SCP_TOKEN`: SCP top bar > API menu > create token
    - `SERVER_ID`: shown in the SCP (the script lists candidates if unset)
-   - `CLOUDFLARE_API_TOKEN`: scoped to Zone > DNS > Edit on dwainosaur.com
+   - `CLOUDFLARE_API_TOKEN`: scoped to Zone > DNS > Edit on seanre.id
 3. Review the plan, then run it:
 
 ```bash
