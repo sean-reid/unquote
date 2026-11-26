@@ -42,7 +42,7 @@ services:
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: app
       CLICKHOUSE_PASSWORD: ${APP_PASSWORD}
-      ORIGIN: ${ORIGIN:-https://unquote.dwainosaur.com}
+      ORIGIN: ${ORIGIN:-https://unquote.seanre.id}
     ports:
       - '127.0.0.1:3000:3000'
     depends_on:

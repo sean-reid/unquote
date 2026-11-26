@@ -87,17 +87,22 @@ createServer((req, res) => {
 
     // Cloudflare
     if (p === '/zones') {
-      return json(res, 200, { success: true, result: [{ id: 'zone-1', name: 'dwainosaur.com' }] });
+      const zones = [{ id: 'zone-1', name: 'seanre.id' }];
+      const wanted = url.searchParams.get('name');
+      return json(res, 200, {
+        success: true,
+        result: zones.filter((z) => !wanted || z.name === wanted),
+      });
     }
     if (p === '/zones/zone-1/dns_records' && req.method === 'GET') {
-      if (scenario === 'dnsconflict') {
+      if (scenario === 'dnsconflict' && url.searchParams.get('name') === 'unquote.seanre.id') {
         return json(res, 200, {
           success: true,
           result: [
             {
               id: 'rec-9',
               type: 'A',
-              name: 'unquote.dwainosaur.com',
+              name: 'unquote.seanre.id',
               content: '198.51.100.7',
               proxied: true,
             },

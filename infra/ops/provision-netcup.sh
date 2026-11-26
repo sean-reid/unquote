@@ -13,7 +13,7 @@
 #   NETCUP_SCP_USER       CCP customer number (the SCP login)
 #   NETCUP_SCP_TOKEN      refresh token from SCP top bar > API menu
 #   SERVER_ID             netcup server id (the script lists candidates if unset)
-#   CLOUDFLARE_API_TOKEN  scoped to Zone > DNS > Edit for dwainosaur.com
+#   CLOUDFLARE_API_TOKEN  scoped to Zone > DNS > Edit for seanre.id
 # Optional:
 #   NETCUP_SCP_PASSWORD   password-grant fallback when no token is set
 #   NETCUP_USER_ID        SCP internal user id, if JWT autodetection misses
@@ -30,8 +30,8 @@ TOKEN_URL=${NETCUP_TOKEN_URL:-https://www.servercontrolpanel.de/realms/scp/proto
 CF_API=${CF_API_BASE:-https://api.cloudflare.com/client/v4}
 OIDC_CLIENT_ID=${NETCUP_OIDC_CLIENT_ID:-scp}
 
-ZONE_NAME=dwainosaur.com
-RECORD_NAME=unquote.dwainosaur.com
+ZONE_NAME=seanre.id
+RECORD_NAME=unquote.seanre.id
 HOSTNAME_TO_SET=unquote
 KEY_NAME=unquote-deploy
 KEY_FILE="$SCRIPT_DIR/deploy_key"

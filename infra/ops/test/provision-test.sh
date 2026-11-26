@@ -73,7 +73,7 @@ RC=$?
 set -e
 expect_rc 0 "exits 0"
 check "task polled to done" 'task task-abc finished'
-check "dns created" 'DNS created'
+check "dns created" 'DNS created: unquote.seanre.id'
 check "summary reports execution" 'reinstall: EXECUTED'
 
 echo "== failure: bad token"
