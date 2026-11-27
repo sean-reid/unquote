@@ -1,5 +1,5 @@
 import { error, json } from '@sveltejs/kit';
-import { scenePanel } from '$lib/server/movie.js';
+import { scenePanel } from '#lib/server/movie.js';
 import type { RequestHandler } from './$types.js';
 
 export const GET: RequestHandler = async ({ params, url, setHeaders }) => {

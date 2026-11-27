@@ -1,6 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { ExpandableNeighbor, ScenePanel } from '$lib/server/movie.js';
+  import type { ExpandableNeighbor, ScenePanel } from '#lib/server/movie.js';
   import type { PageData } from './$types.js';
 
   let { data }: { data: PageData } = $props();

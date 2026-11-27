@@ -1,6 +1,6 @@
 import type { Handle } from '@sveltejs/kit/hooks';
-import { logPageview } from '$lib/server/analytics.js';
-import { warmup } from '$lib/server/embed.js';
+import { logPageview } from '#lib/server/analytics.js';
+import { warmup } from '#lib/server/embed.js';
 
 // Load the query encoder at boot rather than on the first search, so no user
 // request ever pays the model cold start.

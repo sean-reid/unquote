@@ -1,5 +1,5 @@
-import { logSearch } from '$lib/server/analytics.js';
-import { movieCount, search } from '$lib/server/search.js';
+import { logSearch } from '#lib/server/analytics.js';
+import { movieCount, search } from '#lib/server/search.js';
 import type { PageServerLoad } from './$types.js';
 
 export const load: PageServerLoad = async (event) => {

@@ -4,7 +4,7 @@ import {
   bridgePairs,
   movieHeader,
   pairSimilarity,
-} from '$lib/server/movie.js';
+} from '#lib/server/movie.js';
 import type { PageServerLoad } from './$types.js';
 
 export const load: PageServerLoad = async ({ params }) => {
