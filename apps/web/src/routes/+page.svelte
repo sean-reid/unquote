@@ -21,7 +21,7 @@
   // An emptied box means start over: drop the results and return to the landing state.
   function onInput() {
     if (searched && query.trim() === '') {
-      void goto(resolve('/'), { keepFocus: true });
+      void goto(resolve('/'), { reset: false });
     }
   }
 
