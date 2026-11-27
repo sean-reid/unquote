@@ -1,4 +1,4 @@
-unquote.seanre.id, unquote.dwainosaur.com {
+unquote.seanre.id {
 	encode zstd gzip
 
 	header {
