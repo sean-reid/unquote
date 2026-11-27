@@ -1,6 +1,6 @@
 <script lang="ts">
   import { alignWords } from '@unquote/shared';
-  import { browser } from '$app/environment';
+  import { browser } from '$app/env';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import type { PageData } from './$types.js';
@@ -21,7 +21,7 @@
   // An emptied box means start over: drop the results and return to the landing state.
   function onInput() {
     if (searched && query.trim() === '') {
-      void goto(resolve('/'), { keepFocus: true });
+      void goto(resolve('/'), { reset: false });
     }
   }
 
@@ -137,7 +137,7 @@
 
       {#if data.response!.movie}
         {@const movie = data.response!.movie}
-        <a class="movie-banner" href={resolve(`/movie/${movie.movieId}`)}>
+        <a class="movie-banner" href={resolve(`movie/${movie.movieId}`)}>
           {#if posterUrl(movie.posterPath)}
             <img src={posterUrl(movie.posterPath)} alt="" width="46" height="69" />
           {/if}

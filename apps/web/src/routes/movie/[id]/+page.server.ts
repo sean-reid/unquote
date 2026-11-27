@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { fiveLines, movieHeader, segmentBlocks, similarMovies } from '$lib/server/movie.js';
+import { fiveLines, movieHeader, segmentBlocks, similarMovies } from '#lib/server/movie.js';
 import type { PageServerLoad } from './$types.js';
 
 export const load: PageServerLoad = async ({ params, url }) => {

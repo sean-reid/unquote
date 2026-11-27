@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { logSearch } from '$lib/server/analytics.js';
-import { search } from '$lib/server/search.js';
+import { logSearch } from '#lib/server/analytics.js';
+import { search } from '#lib/server/search.js';
 import type { RequestHandler } from './$types.js';
 
 export const GET: RequestHandler = async (event) => {
