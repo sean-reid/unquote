@@ -1,6 +1,6 @@
 <script lang="ts">
   import { alignWords } from '@unquote/shared';
-  import { browser } from '$app/environment';
+  import { browser } from '$app/env';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import type { PageData } from './$types.js';
